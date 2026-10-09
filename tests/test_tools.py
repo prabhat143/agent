@@ -25,6 +25,6 @@ def test_dangerous_command_is_blocked(tmp_path: Path) -> None:
 
 def test_simple_command_runs_inside_workspace(tmp_path: Path) -> None:
     tools = WorkspaceTools(tmp_path)
-    output = tools.run_command("python -c print('ok')")
+    output = tools.run_command("python -c \"print('ok')\"")
     assert "exit_code=0" in output
     assert "ok" in output
