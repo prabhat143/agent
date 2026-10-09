@@ -57,16 +57,48 @@ class AutonomousDeveloper:
         llm: LLMClient,
         tools: WorkspaceTools,
         progress: Callable[[str], None] | None = None,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.config = config
         self.llm = llm
         self.tools = tools
         self.progress = progress or (lambda _message: None)
+        self.event_callback = event_callback or (lambda _event: None)
+
+    def _event(
+        self,
+        kind: str,
+        title: str,
+        *,
+        status: str = "info",
+        detail: str = "",
+        step: int | None = None,
+        action: str | None = None,
+        target: str | None = None,
+    ) -> None:
+        self.event_callback(
+            {
+                "kind": kind,
+                "title": title,
+                "status": status,
+                "detail": detail,
+                "step": step,
+                "action": action,
+                "target": target,
+                "max_steps": self.config.max_steps,
+            }
+        )
 
     def plan(self, task: str) -> str:
         self.progress("[planner] Asking the model to create an implementation plan...")
-        plan = self.llm.complete(PLAN_PROMPT, task)
+        self._event("planner", "Creating implementation plan", status="running")
+        try:
+            plan = self.llm.complete(PLAN_PROMPT, task)
+        except Exception as exc:
+            self._event("planner", "Planning failed", status="error", detail=str(exc))
+            raise
         self.progress("[planner] Plan ready.")
+        self._event("planner", "Implementation plan ready", status="success", detail=plan)
         return plan
 
     def run(self, task: str, plan: str | None = None) -> AgentResult:
@@ -74,32 +106,73 @@ class AutonomousDeveloper:
         history: list[dict[str, Any]] = []
         initial_listing = self.tools.list_files(".")
         self.progress(f"[workspace] Initial files: {self._shorten(initial_listing, 500)}")
+        self._event(
+            "workspace",
+            "Workspace inspected",
+            status="success",
+            detail=self._shorten(initial_listing, 2000),
+        )
 
         for step in range(1, self.config.max_steps + 1):
             self.progress(f"\n[step {step}/{self.config.max_steps}] Thinking about the next action...")
+            self._event(
+                "thinking",
+                "AI is deciding the next action",
+                status="running",
+                step=step,
+            )
             prompt = self._build_turn_prompt(task, plan, initial_listing, history, step)
-            raw = self.llm.complete(SYSTEM_PROMPT, prompt)
+            try:
+                raw = self.llm.complete(SYSTEM_PROMPT, prompt)
+            except Exception as exc:
+                self._event(
+                    "model",
+                    "Model request failed",
+                    status="error",
+                    detail=str(exc),
+                    step=step,
+                )
+                raise
 
             try:
                 decision = self._parse_decision(raw)
             except ValueError as exc:
                 self.progress(f"[step {step}] Model returned invalid action JSON: {exc}")
-                history.append({
-                    "step": step,
-                    "action": "invalid_model_output",
-                    "observation": str(exc),
-                    "raw": raw[:2000],
-                })
+                self._event(
+                    "model",
+                    "Invalid model response; retrying",
+                    status="warning",
+                    detail=str(exc),
+                    step=step,
+                )
+                history.append(
+                    {
+                        "step": step,
+                        "action": "invalid_model_output",
+                        "observation": str(exc),
+                        "raw": raw[:2000],
+                    }
+                )
                 continue
 
             action = decision["action"]
             args = decision.get("args", {})
             reason = decision.get("reason", "")
+            target = self._action_target(action, args)
 
             self.progress(f"[step {step}] Action: {action}")
             if reason:
                 self.progress(f"[step {step}] Why   : {reason}")
             self._report_action_details(step, action, args)
+            self._event(
+                "action",
+                self._action_title(action, target),
+                status="running",
+                detail=reason,
+                step=step,
+                action=action,
+                target=target,
+            )
 
             if action == "finish":
                 summary = str(args.get("summary", "Task completed."))
@@ -107,16 +180,37 @@ class AutonomousDeveloper:
                 self.progress(f"[step {step}] Agent marked the task complete.")
                 if verification:
                     self.progress(f"[verify] {verification}")
+                self._event(
+                    "finish",
+                    "Agent marked task complete",
+                    status="success",
+                    detail=f"{summary}\n\nVerification: {verification}".strip(),
+                    step=step,
+                    action=action,
+                )
                 history.append({"step": step, "action": action, "reason": reason})
                 return AgentResult(True, summary, verification, step, history)
 
             self.progress(f"[step {step}] Executing {action}...")
             try:
                 observation = self._execute(action, args)
+                event_status = "success"
+                event_title = f"{action} completed"
             except (ToolError, ValueError, TypeError) as exc:
                 observation = f"TOOL_ERROR: {exc}"
+                event_status = "error"
+                event_title = f"{action} failed"
 
             self.progress(f"[step {step}] Result : {self._shorten(observation, 1200)}")
+            self._event(
+                "result",
+                event_title,
+                status=event_status,
+                detail=self._shorten(observation, 4000),
+                step=step,
+                action=action,
+                target=target,
+            )
 
             history.append(
                 {
@@ -129,6 +223,13 @@ class AutonomousDeveloper:
             )
 
         self.progress(f"[agent] Reached maximum step limit: {self.config.max_steps}")
+        self._event(
+            "finish",
+            "Maximum step limit reached",
+            status="error",
+            detail=f"Stopped after {self.config.max_steps} steps.",
+            step=self.config.max_steps,
+        )
         return AgentResult(
             completed=False,
             summary=f"Stopped after reaching the configured step limit ({self.config.max_steps}).",
@@ -136,6 +237,29 @@ class AutonomousDeveloper:
             steps=self.config.max_steps,
             history=history,
         )
+
+    @staticmethod
+    def _action_target(action: str, args: dict[str, Any]) -> str | None:
+        if action in {"read_file", "write_file", "make_directory", "list_files"}:
+            return str(args.get("path", "."))
+        if action == "run_command":
+            return str(args.get("command", ""))
+        return None
+
+    @staticmethod
+    def _action_title(action: str, target: str | None) -> str:
+        labels = {
+            "list_files": "Inspecting files",
+            "read_file": "Reading file",
+            "write_file": "Writing file",
+            "make_directory": "Creating directory",
+            "run_command": "Running command",
+            "finish": "Finishing task",
+        }
+        title = labels.get(action, action)
+        if target:
+            return f"{title}: {target}"
+        return title
 
     def _report_action_details(self, step: int, action: str, args: dict[str, Any]) -> None:
         if action in {"read_file", "write_file", "make_directory", "list_files"}:
