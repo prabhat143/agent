@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from agent_config import AgentConfig
 from llm_clients import LLMClient
@@ -51,26 +51,39 @@ class AgentResult:
 
 
 class AutonomousDeveloper:
-    def __init__(self, config: AgentConfig, llm: LLMClient, tools: WorkspaceTools) -> None:
+    def __init__(
+        self,
+        config: AgentConfig,
+        llm: LLMClient,
+        tools: WorkspaceTools,
+        progress: Callable[[str], None] | None = None,
+    ) -> None:
         self.config = config
         self.llm = llm
         self.tools = tools
+        self.progress = progress or (lambda _message: None)
 
     def plan(self, task: str) -> str:
-        return self.llm.complete(PLAN_PROMPT, task)
+        self.progress("[planner] Asking the model to create an implementation plan...")
+        plan = self.llm.complete(PLAN_PROMPT, task)
+        self.progress("[planner] Plan ready.")
+        return plan
 
     def run(self, task: str, plan: str | None = None) -> AgentResult:
         plan = plan or self.plan(task)
         history: list[dict[str, Any]] = []
         initial_listing = self.tools.list_files(".")
+        self.progress(f"[workspace] Initial files: {self._shorten(initial_listing, 500)}")
 
         for step in range(1, self.config.max_steps + 1):
+            self.progress(f"\n[step {step}/{self.config.max_steps}] Thinking about the next action...")
             prompt = self._build_turn_prompt(task, plan, initial_listing, history, step)
             raw = self.llm.complete(SYSTEM_PROMPT, prompt)
 
             try:
                 decision = self._parse_decision(raw)
             except ValueError as exc:
+                self.progress(f"[step {step}] Model returned invalid action JSON: {exc}")
                 history.append({
                     "step": step,
                     "action": "invalid_model_output",
@@ -83,16 +96,27 @@ class AutonomousDeveloper:
             args = decision.get("args", {})
             reason = decision.get("reason", "")
 
+            self.progress(f"[step {step}] Action: {action}")
+            if reason:
+                self.progress(f"[step {step}] Why   : {reason}")
+            self._report_action_details(step, action, args)
+
             if action == "finish":
                 summary = str(args.get("summary", "Task completed."))
                 verification = str(args.get("verification", ""))
+                self.progress(f"[step {step}] Agent marked the task complete.")
+                if verification:
+                    self.progress(f"[verify] {verification}")
                 history.append({"step": step, "action": action, "reason": reason})
                 return AgentResult(True, summary, verification, step, history)
 
+            self.progress(f"[step {step}] Executing {action}...")
             try:
                 observation = self._execute(action, args)
             except (ToolError, ValueError, TypeError) as exc:
                 observation = f"TOOL_ERROR: {exc}"
+
+            self.progress(f"[step {step}] Result : {self._shorten(observation, 1200)}")
 
             history.append(
                 {
@@ -104,6 +128,7 @@ class AutonomousDeveloper:
                 }
             )
 
+        self.progress(f"[agent] Reached maximum step limit: {self.config.max_steps}")
         return AgentResult(
             completed=False,
             summary=f"Stopped after reaching the configured step limit ({self.config.max_steps}).",
@@ -111,6 +136,17 @@ class AutonomousDeveloper:
             steps=self.config.max_steps,
             history=history,
         )
+
+    def _report_action_details(self, step: int, action: str, args: dict[str, Any]) -> None:
+        if action in {"read_file", "write_file", "make_directory", "list_files"}:
+            path = args.get("path", ".")
+            self.progress(f"[step {step}] Target: {path}")
+        elif action == "run_command":
+            self.progress(f"[step {step}] Command: {args.get('command', '')}")
+
+        if action == "write_file":
+            content = str(args.get("content", ""))
+            self.progress(f"[step {step}] Writing {len(content)} characters.")
 
     def _execute(self, action: str, args: dict[str, Any]) -> str:
         if action == "list_files":
@@ -174,6 +210,13 @@ class AutonomousDeveloper:
             "content_preview": content[:500],
             "content_length": len(content),
         }
+
+    @staticmethod
+    def _shorten(value: Any, limit: int) -> str:
+        text = str(value).strip()
+        if len(text) <= limit:
+            return text
+        return text[:limit] + f"... [truncated {len(text) - limit} chars]"
 
     @staticmethod
     def _build_turn_prompt(
