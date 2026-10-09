@@ -59,8 +59,8 @@ class AutonomousDeveloper:
     def plan(self, task: str) -> str:
         return self.llm.complete(PLAN_PROMPT, task)
 
-    def run(self, task: str) -> AgentResult:
-        plan = self.plan(task)
+    def run(self, task: str, plan: str | None = None) -> AgentResult:
+        plan = plan or self.plan(task)
         history: list[dict[str, Any]] = []
         initial_listing = self.tools.list_files(".")
 
