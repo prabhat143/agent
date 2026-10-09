@@ -16,6 +16,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def print_progress(message: str) -> None:
+    print(message, flush=True)
+
+
 def main() -> int:
     args = parse_args()
     task = args.task or input("Task > ").strip()
@@ -27,7 +31,7 @@ def main() -> int:
         config = AgentConfig.from_env(args.workspace)
         llm = build_llm(config)
         tools = WorkspaceTools(config.workspace, config.command_timeout)
-        agent = AutonomousDeveloper(config, llm, tools)
+        agent = AutonomousDeveloper(config, llm, tools, progress=print_progress)
 
         print(f"Provider : {config.provider}")
         print(f"Workspace: {config.workspace}")
