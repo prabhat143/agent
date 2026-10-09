@@ -46,18 +46,49 @@ class OllamaClient:
             ],
             "options": {"temperature": 0.1},
         }
+
         try:
-            response = requests.post(self.url, json=payload, timeout=180)
-            response.raise_for_status()
-        except requests.RequestException as exc:
+            # Local coding models can take several minutes on the first request,
+            # especially larger models such as qwen3-coder:30B.
+            response = requests.post(self.url, json=payload, timeout=(10, 600))
+        except requests.exceptions.ConnectTimeout as exc:
             raise RuntimeError(
-                "Could not reach Ollama. Make sure Ollama is running and the configured model is installed."
+                f"Timed out connecting to Ollama at {self.url}. "
+                "Check OLLAMA_BASE_URL and confirm Ollama is running."
+            ) from exc
+        except requests.exceptions.ReadTimeout as exc:
+            raise RuntimeError(
+                f"Ollama model '{self.model}' did not finish within 600 seconds. "
+                "Try a smaller model or increase the client timeout."
+            ) from exc
+        except requests.exceptions.ConnectionError as exc:
+            raise RuntimeError(
+                f"Could not connect to Ollama at {self.url}. "
+                "Confirm Ollama is running and OLLAMA_BASE_URL is correct."
+            ) from exc
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Ollama request failed: {exc}") from exc
+
+        if not response.ok:
+            try:
+                detail = response.json()
+            except ValueError:
+                detail = response.text[:1000]
+            raise RuntimeError(
+                f"Ollama returned HTTP {response.status_code} for model "
+                f"'{self.model}': {detail}"
+            )
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Ollama returned a non-JSON response: {response.text[:500]}"
             ) from exc
 
-        data = response.json()
         content = data.get("message", {}).get("content")
         if not content:
-            raise RuntimeError(f"Unexpected Ollama response: {json.dumps(data)[:500]}")
+            raise RuntimeError(f"Unexpected Ollama response: {json.dumps(data)[:1000]}")
         return content.strip()
 
 
