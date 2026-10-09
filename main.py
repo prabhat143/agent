@@ -36,8 +36,7 @@ def main() -> int:
         print(plan)
         print("\nExecuting...\n")
 
-        # Run uses a fresh planning call so that its internal state remains self-contained.
-        result = agent.run(task)
+        result = agent.run(task, plan=plan)
 
         print("\n=== Result ===")
         print(f"Completed   : {result.completed}")
