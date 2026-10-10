@@ -57,9 +57,9 @@ class ChatProgressStore:
         self.publish({"kind": "chat", "role": "user", "title": "You", "status": "info", "detail": cleaned})
         self.publish({
             "kind": "guidance",
-            "title": "Instruction queued for the agent",
+            "title": "Instruction queued",
             "status": "warning",
-            "detail": "This will be applied before the next AI reasoning step.",
+            "detail": "Your instruction will be applied before the next reasoning step.",
         })
 
     def drain_instructions(self) -> list[str]:
@@ -123,12 +123,10 @@ class ChatProgressStore:
                 return []
             nodes: list[dict[str, Any]] = []
             try:
-                children = sorted(
-                    directory.iterdir(),
-                    key=lambda p: (not p.is_dir(), p.name.lower()),
-                )
+                children = sorted(directory.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
             except (OSError, PermissionError):
                 return nodes
+
             for child in children:
                 if child.name in IGNORED_DIRS or child.name.startswith(".DS_Store"):
                     continue
@@ -173,50 +171,216 @@ HTML = r"""
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>PTA Agent</title>
+<title>PTA Agent Workspace</title>
 <style>
-:root{color-scheme:dark;--bg:#0c0d10;--panel:#15171c;--panel2:#1d2026;--line:#2b2f38;--text:#f3f5f7;--muted:#9aa3b2;--accent:#8b5cf6;--ok:#41c98e;--warn:#f4bd50;--bad:#ff6675;--blue:#62b5ff}
-*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{overflow:hidden}
-.app{display:grid;grid-template-columns:280px minmax(0,1fr) 390px;width:100%;height:100dvh;min-height:0;overflow:hidden}
-.explorer{background:#0f1115;border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}.explorerHead{height:64px;flex:0 0 64px;padding:13px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:8px}.explorerTitle{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.07em}.explorerRoot{font-size:10px;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:205px}.refresh{padding:6px 8px;background:var(--panel2);color:#ccd3dd;border:1px solid var(--line);border-radius:7px;font-size:11px}.tree{flex:1;min-height:0;overflow:auto;padding:8px 5px 20px;font-size:12px;user-select:none}.treeRow{height:26px;display:flex;align-items:center;gap:5px;border-radius:6px;padding-right:5px;cursor:pointer;white-space:nowrap;min-width:max-content}.treeRow:hover{background:#191c22}.treeRow.active{background:#232834;color:#fff}.indent{display:inline-block;flex:0 0 auto}.twisty{width:14px;text-align:center;color:#7e8795;font-size:10px}.fileIcon{width:15px;text-align:center;color:#9aa3b2}.treeName{overflow:hidden;text-overflow:ellipsis;max-width:210px}.treeEmpty{padding:18px 10px;color:var(--muted);font-size:11px}
-.chat{display:flex;flex-direction:column;min-width:0;min-height:0;border-right:1px solid var(--line);overflow:hidden}.top{height:64px;flex:0 0 64px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;border-bottom:1px solid var(--line);background:rgba(12,13,16,.94)}.brand{font-weight:750}.sub{font-size:12px;color:var(--muted);margin-top:3px}.status{font-size:11px;font-weight:800;padding:6px 9px;border:1px solid var(--line);border-radius:999px;color:var(--blue)}
-.mainArea{position:relative;flex:1 1 auto;min-height:0;overflow:hidden}.messages{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:26px 22px 28px;overscroll-behavior:contain;scrollbar-gutter:stable}.msg{max-width:780px;margin:0 auto 18px;display:flex;gap:12px}.avatar{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;flex:0 0 auto;background:var(--panel2);font-size:12px;font-weight:800}.msg.user .avatar{background:#2b2440}.bubble{min-width:0;flex:1}.who{font-size:12px;font-weight:750;margin-bottom:6px}.body{font-size:14px;line-height:1.6;white-space:pre-wrap;color:#e7eaf0;overflow-wrap:anywhere}.msg.system .body{color:#c3cad5;font-size:13px}.meta{font-size:10px;color:var(--muted);margin-top:6px}
-.preview{position:absolute;inset:0;background:#0c0d10;display:none;flex-direction:column;z-index:4}.preview.open{display:flex}.previewHead{height:46px;flex:0 0 46px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 14px;gap:12px}.previewPath{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#cbd6ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.closePreview{background:#22262d;color:#d7dce4;border:1px solid #343a45;border-radius:7px;padding:6px 9px;font-size:11px}.code{flex:1;min-height:0;overflow:auto;margin:0;padding:16px 18px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;white-space:pre;tab-size:4;color:#d9dee7;background:#101216}
-.composerWrap{position:relative;flex:0 0 auto;padding:14px 22px 20px;background:linear-gradient(180deg,rgba(12,13,16,.35),var(--bg) 28%);z-index:5}.composer{max-width:820px;margin:auto;background:var(--panel);border:1px solid #363b46;border-radius:18px;padding:12px 12px 10px;box-shadow:0 14px 35px rgba(0,0,0,.35)}textarea{width:100%;min-height:58px;max-height:150px;resize:vertical;background:transparent;border:0;outline:0;color:var(--text);font:inherit;padding:4px 6px}.actions{display:flex;justify-content:space-between;align-items:center;gap:10px}.hint{font-size:11px;color:var(--muted)}button{border:0;border-radius:10px;padding:9px 13px;font-weight:750;cursor:pointer}.send{background:#f0f2f5;color:#111}.stop{background:#2a1b1f;color:#ff9aa5;border:1px solid #58313a}.send:disabled{opacity:.5;cursor:not-allowed}
-.side{background:#101216;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}.sideTop{flex:0 0 auto;padding:18px;border-bottom:1px solid var(--line)}.sideTitle{font-weight:800;font-size:14px}.info{margin-top:12px;display:grid;gap:10px}.infoRow{font-size:11px;color:var(--muted)}.infoRow b{display:block;color:#dfe4ec;font-size:12px;margin-top:2px;font-weight:650;white-space:normal;overflow-wrap:anywhere}.path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#b8c8ff!important}.progress{height:5px;background:#22262d;border-radius:999px;overflow:hidden;margin-top:14px}.bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--blue));transition:.25s}.stepText{font-size:10px;color:var(--muted);margin-top:6px}.timeline{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:16px 14px;overscroll-behavior:contain;scrollbar-gutter:stable}.event{position:relative;border-left:2px solid var(--line);padding:0 0 18px 14px;margin-left:6px}.event:last-child{padding-bottom:4px}.event:before{content:"";position:absolute;left:-6px;top:2px;width:10px;height:10px;border-radius:50%;background:#6f7785;box-shadow:0 0 0 3px #101216}.event.success:before{background:var(--ok)}.event.error:before{background:var(--bad)}.event.warning:before{background:var(--warn)}.event.running:before{background:var(--blue)}.et{font-size:12px;font-weight:700;line-height:1.35;overflow-wrap:anywhere}.ed{font-size:11px;color:var(--muted);margin-top:5px;white-space:pre-wrap;max-height:160px;overflow:auto;overflow-wrap:anywhere}.em{font-size:9px;color:#727b89;margin-top:5px}.cwd{font-size:10px;color:#9eb6ff;margin-top:5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.empty{font-size:12px;color:var(--muted);padding:22px 8px;text-align:center}
-.messages::-webkit-scrollbar,.timeline::-webkit-scrollbar,.tree::-webkit-scrollbar,.code::-webkit-scrollbar,.ed::-webkit-scrollbar{width:10px;height:10px}.messages::-webkit-scrollbar-thumb,.timeline::-webkit-scrollbar-thumb,.tree::-webkit-scrollbar-thumb,.code::-webkit-scrollbar-thumb,.ed::-webkit-scrollbar-thumb{background:#343945;border-radius:999px;border:2px solid transparent;background-clip:padding-box}
-@media(max-width:1150px){.app{grid-template-columns:230px minmax(0,1fr) 340px}}@media(max-width:900px){body{overflow:auto}.app{display:flex;flex-direction:column;height:auto;min-height:100dvh;overflow:visible}.explorer{height:300px;flex:0 0 300px;border-right:0;border-bottom:1px solid var(--line)}.chat{height:100dvh;min-height:620px;border-right:0}.side{display:flex;min-height:420px;max-height:70dvh;border-top:1px solid var(--line)}}
+:root{
+  color-scheme:dark;
+  --bg:#0b0d11;--surface:#101319;--surface2:#151922;--surface3:#1a1f29;
+  --line:#242a35;--line2:#303846;--text:#eef2f7;--muted:#8e98a8;
+  --accent:#8b7cff;--accent2:#64b5ff;--ok:#43d49b;--warn:#f4bd62;--bad:#ff6f7d;
+  --shadow:0 16px 44px rgba(0,0,0,.28);
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{overflow:hidden}
+button,input,textarea{font:inherit}
+button{cursor:pointer}
+.app{display:grid;grid-template-columns:260px minmax(0,1fr) 350px;width:100%;height:100dvh;min-height:0;overflow:hidden}
+
+/* Explorer */
+.explorer{display:flex;flex-direction:column;min-width:0;min-height:0;background:#0e1116;border-right:1px solid var(--line)}
+.explorerTop{padding:14px 13px 11px;border-bottom:1px solid var(--line);background:#0f1218}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#697485}
+.workspaceTitle{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px}
+.workspaceTitle strong{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.iconBtn{width:28px;height:28px;display:grid;place-items:center;background:transparent;border:1px solid transparent;border-radius:8px;color:#9da7b7}
+.iconBtn:hover{background:var(--surface2);border-color:var(--line)}
+.rootPath{font-size:10px;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fileSearch{padding:9px 10px;border-bottom:1px solid var(--line)}
+.fileSearch input{width:100%;height:31px;border:1px solid var(--line);border-radius:8px;background:#0b0e13;color:var(--text);outline:0;padding:0 10px;font-size:11px}
+.fileSearch input:focus{border-color:#4b5568}
+.tree{flex:1;min-height:0;overflow:auto;padding:7px 5px 18px;font-size:12px;user-select:none;scrollbar-gutter:stable}
+.treeSection{padding:7px 9px 4px;color:#667184;font-size:9px;font-weight:800;letter-spacing:.11em;text-transform:uppercase}
+.treeRow{height:28px;display:flex;align-items:center;gap:5px;padding-right:6px;border-radius:7px;cursor:pointer;white-space:nowrap;min-width:max-content;color:#cbd2dc}
+.treeRow:hover{background:#151922}.treeRow.active{background:#202631;color:#fff}.treeRow.current{box-shadow:inset 2px 0 0 var(--accent2)}
+.indent{display:inline-block;flex:0 0 auto}.twisty{width:14px;text-align:center;color:#798495;font-size:9px}.fileIcon{width:16px;text-align:center;color:#8792a3}.treeName{overflow:hidden;text-overflow:ellipsis;max-width:185px}.treeEmpty{padding:20px 10px;color:var(--muted);font-size:11px;text-align:center}
+
+/* Main */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg);border-right:1px solid var(--line)}
+.topbar{height:60px;flex:0 0 60px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 18px;border-bottom:1px solid var(--line);background:rgba(11,13,17,.96)}
+.brandWrap{min-width:0}.brand{font-size:14px;font-weight:800}.taskLine{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:650px}
+.topActions{display:flex;align-items:center;gap:8px}.providerChip{font-size:10px;color:#b9c4d3;border:1px solid var(--line);background:#10141b;padding:6px 8px;border-radius:999px}.status{font-size:10px;font-weight:850;padding:6px 9px;border:1px solid rgba(100,181,255,.26);border-radius:999px;color:var(--accent2);background:rgba(100,181,255,.08)}
+.tabs{height:38px;flex:0 0 38px;display:flex;align-items:end;padding:0 12px;border-bottom:1px solid var(--line);background:#0e1116;overflow-x:auto}
+.tab{height:33px;display:flex;align-items:center;gap:7px;padding:0 11px;border:0;border-bottom:2px solid transparent;background:transparent;color:#8f99a8;font-size:11px;white-space:nowrap}.tab.active{color:#eef2f7;border-bottom-color:var(--accent)}.tabClose{opacity:.6;font-size:12px}.tabClose:hover{opacity:1}
+.content{position:relative;flex:1 1 auto;min-height:0;overflow:hidden}
+.messages{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:24px 28px 30px;scrollbar-gutter:stable}
+.msg{max-width:820px;margin:0 auto 19px;display:grid;grid-template-columns:28px minmax(0,1fr);gap:11px}.avatar{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:#202630;color:#dfe6f0;font-size:10px;font-weight:800}.msg.user .avatar{background:#2b2545;color:#ddd5ff}.bubble{min-width:0}.who{font-size:11px;font-weight:800;margin:1px 0 6px}.body{font-size:13px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;color:#dfe5ed}.msg.user .body{color:#f0f2f6}.msg.system .body{color:#b4becc}.meta{font-size:9px;color:#667184;margin-top:5px}
+.preview{position:absolute;inset:0;display:none;flex-direction:column;background:#0d1015}.preview.open{display:flex}.previewMeta{height:34px;flex:0 0 34px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 13px;border-bottom:1px solid var(--line);background:#10141a}.breadcrumb{font:10px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9ba8bb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.previewBadge{font-size:9px;color:#7d899a}.code{flex:1;min-height:0;overflow:auto;margin:0;padding:18px 20px 30px;background:#0d1015;color:#d6dde8;font:12px/1.62 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;white-space:pre;tab-size:4;scrollbar-gutter:stable}
+.composerWrap{flex:0 0 auto;padding:12px 18px 16px;background:linear-gradient(180deg,rgba(11,13,17,.3),#0b0d11 32%)}
+.composer{max-width:860px;margin:auto;background:#12161d;border:1px solid #2e3541;border-radius:16px;padding:10px 10px 9px;box-shadow:var(--shadow)}
+textarea{width:100%;min-height:54px;max-height:150px;resize:vertical;background:transparent;border:0;outline:0;color:var(--text);padding:5px 7px;font-size:13px;line-height:1.5}.composerFoot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 3px 0}.hint{font-size:10px;color:#707b8c}.buttons{display:flex;gap:7px}.send,.stop{border-radius:9px;padding:7px 11px;font-size:11px;font-weight:800}.send{border:0;background:#eef1f5;color:#101216}.send:hover{background:#fff}.stop{background:#22171b;color:#ff9ca6;border:1px solid #4d2931}.stop:hover{background:#2b1b20}
+
+/* Activity */
+.activity{display:flex;flex-direction:column;min-width:0;min-height:0;background:#0e1116}
+.activityTop{padding:14px;border-bottom:1px solid var(--line)}.activityHeader{display:flex;align-items:center;justify-content:space-between;gap:10px}.activityHeader strong{font-size:13px}.liveDot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent2);margin-right:6px;box-shadow:0 0 0 4px rgba(100,181,255,.08)}
+.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px}.summary{min-width:0;padding:9px;background:#11151c;border:1px solid var(--line);border-radius:9px}.summary span{display:block;font-size:9px;color:#697486;text-transform:uppercase;letter-spacing:.06em}.summary b{display:block;margin-top:3px;font-size:11px;color:#dce3ec;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.summary.wide{grid-column:1/-1}
+.progressHead{display:flex;align-items:center;justify-content:space-between;margin-top:11px;font-size:9px;color:#788394}.progress{height:5px;background:#1b2029;border-radius:999px;overflow:hidden;margin-top:6px}.bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:.25s}
+.filterBar{display:flex;gap:5px;padding:9px 11px;border-bottom:1px solid var(--line)}.filterBtn{border:1px solid transparent;background:transparent;color:#7f8998;border-radius:7px;padding:5px 8px;font-size:10px}.filterBtn.active{background:#181d25;border-color:#2b323e;color:#dfe5ee}
+.timeline{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px 10px 18px;scrollbar-gutter:stable}.event{position:relative;padding:10px 10px 10px 29px;border-radius:10px;margin-bottom:5px}.event:hover{background:#12161d}.event:before{content:"";position:absolute;left:12px;top:15px;width:7px;height:7px;border-radius:50%;background:#697486}.event:after{content:"";position:absolute;left:15px;top:23px;bottom:-7px;width:1px;background:#252b35}.event:last-child:after{display:none}.event.success:before{background:var(--ok)}.event.error:before{background:var(--bad)}.event.warning:before{background:var(--warn)}.event.running:before{background:var(--accent2)}
+.eventTitle{font-size:11px;font-weight:750;line-height:1.4;color:#dce2eb}.eventMeta{font-size:9px;color:#687384;margin-top:4px}.cwd{font:9px ui-monospace,SFMono-Regular,Menlo,monospace;color:#91a8d4;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.event details{margin-top:6px}.event summary{font-size:9px;color:#778395;cursor:pointer;list-style:none}.event summary::-webkit-details-marker{display:none}.eventDetail{font-size:10px;color:#9ca7b6;line-height:1.45;margin-top:6px;white-space:pre-wrap;max-height:170px;overflow:auto;border-left:2px solid #252c37;padding-left:8px}.empty{padding:28px 12px;text-align:center;color:#6e7989;font-size:11px}
+
+::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#2e3541;border-radius:999px;border:2px solid transparent;background-clip:padding-box}::-webkit-scrollbar-track{background:transparent}
+@media(max-width:1180px){.app{grid-template-columns:225px minmax(0,1fr) 310px}.treeName{max-width:155px}}
+@media(max-width:900px){body{overflow:auto}.app{display:flex;flex-direction:column;height:auto;min-height:100dvh;overflow:visible}.explorer{height:300px;flex:0 0 300px;border-right:0;border-bottom:1px solid var(--line)}.main{height:100dvh;min-height:650px;border-right:0}.activity{height:520px;border-top:1px solid var(--line)}}
 </style>
 </head>
 <body>
 <div class="app">
-<aside class="explorer">
-  <div class="explorerHead"><div><div class="explorerTitle">Workspace</div><div id="explorerRoot" class="explorerRoot">Loading...</div></div><button id="refreshFiles" class="refresh">Refresh</button></div>
-  <div id="tree" class="tree"><div class="treeEmpty">Loading workspace...</div></div>
-</aside>
-<section class="chat">
-  <div class="top"><div><div class="brand">PTA Autonomous Developer</div><div class="sub">Chat with the agent while it builds</div></div><div id="status" class="status">CONNECTING</div></div>
-  <div class="mainArea"><div id="messages" class="messages"></div><div id="preview" class="preview"><div class="previewHead"><div id="previewPath" class="previewPath"></div><button id="closePreview" class="closePreview">Close</button></div><pre id="code" class="code"></pre></div></div>
-  <div class="composerWrap"><div class="composer"><textarea id="input" placeholder="Tell the agent what to change, correct, or focus on..."></textarea><div class="actions"><div class="hint">Your message is applied before the next reasoning step.</div><div><button id="stop" class="stop">Stop</button> <button id="send" class="send">Send</button></div></div></div></div>
-</section>
-<aside class="side"><div class="sideTop"><div class="sideTitle">Live execution</div><div class="info"><div class="infoRow">Provider<b id="provider">—</b></div><div class="infoRow">Workspace root<b id="workspace" class="path">—</b></div><div class="infoRow">Current execution directory<b id="currentDir" class="path">.</b></div></div><div class="progress"><div id="bar" class="bar"></div></div><div id="stepText" class="stepText">Waiting...</div></div><div id="timeline" class="timeline"><div class="empty">Waiting for agent activity...</div></div></aside>
+  <aside class="explorer">
+    <div class="explorerTop">
+      <div class="eyebrow">Explorer</div>
+      <div class="workspaceTitle"><strong>Workspace</strong><button id="refreshFiles" class="iconBtn" title="Refresh files">↻</button></div>
+      <div id="explorerRoot" class="rootPath">Loading…</div>
+    </div>
+    <div class="fileSearch"><input id="fileFilter" placeholder="Filter files…" /></div>
+    <div id="tree" class="tree"><div class="treeEmpty">Loading workspace…</div></div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="brandWrap"><div class="brand">PTA Autonomous Developer</div><div id="taskLine" class="taskLine">Waiting for task…</div></div>
+      <div class="topActions"><span id="providerChip" class="providerChip">ollama</span><span id="status" class="status">CONNECTING</span></div>
+    </div>
+    <div id="tabs" class="tabs"><button class="tab active" data-tab="chat">Chat</button></div>
+    <section class="content">
+      <div id="messages" class="messages"></div>
+      <div id="preview" class="preview">
+        <div class="previewMeta"><div id="previewPath" class="breadcrumb"></div><div id="previewBadge" class="previewBadge">read-only</div></div>
+        <pre id="code" class="code"></pre>
+      </div>
+    </section>
+    <div class="composerWrap">
+      <div class="composer">
+        <textarea id="input" placeholder="Guide the agent, correct it, or ask it to change direction…"></textarea>
+        <div class="composerFoot"><div class="hint">Enter to send · Shift+Enter for a new line</div><div class="buttons"><button id="stop" class="stop">Stop</button><button id="send" class="send">Send</button></div></div>
+      </div>
+    </div>
+  </main>
+
+  <aside class="activity">
+    <div class="activityTop">
+      <div class="activityHeader"><strong><span class="liveDot"></span>Live activity</strong><span id="stepText" style="font-size:10px;color:#788394">Waiting</span></div>
+      <div class="summaryGrid">
+        <div class="summary"><span>Provider</span><b id="provider">—</b></div>
+        <div class="summary"><span>Status</span><b id="statusText">—</b></div>
+        <div class="summary wide"><span>Current directory</span><b id="currentDir">.</b></div>
+      </div>
+      <div class="progressHead"><span>Run progress</span><span id="progressPct">0%</span></div>
+      <div class="progress"><div id="bar" class="bar"></div></div>
+    </div>
+    <div class="filterBar"><button class="filterBtn active" data-filter="all">All</button><button class="filterBtn" data-filter="error">Errors</button><button class="filterBtn" data-filter="action">Actions</button></div>
+    <div id="timeline" class="timeline"><div class="empty">No activity yet.</div></div>
+  </aside>
 </div>
 <script>
-const seen=new Set(),messages=document.getElementById('messages'),timeline=document.getElementById('timeline'),input=document.getElementById('input'),tree=document.getElementById('tree');let maxSteps=0,lastStep=0,activeFile='',lastTreeSignature='';const expanded=new Set();
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}function nearBottom(el,threshold=90){return el.scrollHeight-el.scrollTop-el.clientHeight<threshold}
-function updateProgress(e){if(e.max_steps)maxSteps=e.max_steps;if(e.step)lastStep=Math.max(lastStep,e.step);if(e.cwd)document.getElementById('currentDir').textContent=e.cwd;if(maxSteps){document.getElementById('bar').style.width=Math.min(100,(lastStep/maxSteps)*100)+'%';document.getElementById('stepText').textContent=`Step ${lastStep} of ${maxSteps}`}if(e.kind==='finish'&&e.status==='success'){document.getElementById('bar').style.width='100%';document.getElementById('stepText').textContent='Completed'}}
-function addChat(e){const follow=nearBottom(messages);const wrap=document.createElement('div');wrap.className='msg '+(e.role==='user'?'user':e.kind==='chat'?'assistant':'system');const who=e.role==='user'?'You':'Agent';wrap.innerHTML=`<div class="avatar">${e.role==='user'?'Y':'AI'}</div><div class="bubble"><div class="who">${who}</div><div class="body">${esc(e.detail||e.title||'')}</div><div class="meta">${esc(e.timestamp||'')}</div></div>`;messages.appendChild(wrap);if(follow)messages.scrollTo({top:messages.scrollHeight,behavior:'smooth'})}
-function addTimeline(e){if(e.kind==='chat')return;const follow=nearBottom(timeline);if(timeline.querySelector('.empty'))timeline.innerHTML='';const el=document.createElement('div');el.className='event '+(e.status||'info');el.innerHTML=`<div class="et">${esc(e.title||e.kind)}</div>${e.detail?`<div class="ed">${esc(e.detail)}</div>`:''}${e.cwd?`<div class="cwd">cwd: ${esc(e.cwd)}</div>`:''}<div class="em">${e.step?`Step ${e.step} · `:''}${esc(e.timestamp||'')}</div>`;timeline.appendChild(el);if(follow)timeline.scrollTo({top:timeline.scrollHeight,behavior:'smooth'})}
-function addEvent(e){if(seen.has(e.id))return;seen.add(e.id);updateProgress(e);if(e.kind==='chat'||e.kind==='guidance'||e.kind==='finish')addChat(e);addTimeline(e);if(e.kind==='result'&&(e.action==='write_file'||e.action==='make_directory'))loadFiles(false)}
-function paint(s){document.getElementById('provider').textContent=s.provider||'—';document.getElementById('workspace').textContent=s.workspace||'—';document.getElementById('explorerRoot').textContent=s.workspace||'Workspace';document.getElementById('currentDir').textContent=s.current_directory||'.';const st=document.getElementById('status');st.textContent=(s.status||'running').toUpperCase();(s.events||[]).forEach(addEvent)}
-function iconFor(name){const ext=(name.split('.').pop()||'').toLowerCase();if(['java','kt'].includes(ext))return 'J';if(['xml','html'].includes(ext))return '<>';if(['json','yaml','yml','properties','toml'].includes(ext))return '{}';if(['py'].includes(ext))return 'Py';if(['md','txt'].includes(ext))return 'T';return '·'}
-function renderNodes(nodes,depth=0){let html='';for(const n of nodes){if(n.type==='directory'){if(depth<2&&!expanded.has(n.path))expanded.add(n.path);const open=expanded.has(n.path);html+=`<div class="treeRow folder" data-path="${esc(n.path)}" style="padding-left:${depth*14+5}px"><span class="twisty">${open?'▼':'▶'}</span><span class="fileIcon">▰</span><span class="treeName">${esc(n.name)}</span></div>`;if(open)html+=renderNodes(n.children||[],depth+1)}else{html+=`<div class="treeRow file ${activeFile===n.path?'active':''}" data-path="${esc(n.path)}" style="padding-left:${depth*14+5}px"><span class="twisty"></span><span class="fileIcon">${esc(iconFor(n.name))}</span><span class="treeName">${esc(n.name)}</span></div>`}}return html}
-async function loadFiles(force=true){try{const r=await fetch('/api/files',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const data=await r.json(),sig=JSON.stringify(data.tree);if(!force&&sig===lastTreeSignature)return;lastTreeSignature=sig;tree.innerHTML=data.tree.length?renderNodes(data.tree):'<div class="treeEmpty">Workspace is empty.</div>';bindTree()}catch(e){tree.innerHTML=`<div class="treeEmpty">Could not load workspace: ${esc(e.message)}</div>`}}
-function bindTree(){tree.querySelectorAll('.folder').forEach(el=>el.onclick=()=>{const p=el.dataset.path;if(expanded.has(p))expanded.delete(p);else expanded.add(p);loadFiles(true)});tree.querySelectorAll('.file').forEach(el=>el.onclick=()=>openFile(el.dataset.path))}
-async function openFile(path){try{const r=await fetch('/api/file?path='+encodeURIComponent(path),{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const data=await r.json();activeFile=path;document.getElementById('previewPath').textContent=data.path;document.getElementById('code').textContent=data.content;document.getElementById('preview').classList.add('open');loadFiles(true)}catch(e){alert('Could not open file: '+e.message)}}
-document.getElementById('closePreview').onclick=()=>{document.getElementById('preview').classList.remove('open');activeFile='';loadFiles(true)};document.getElementById('refreshFiles').onclick=()=>loadFiles(true);
-async function send(){const text=input.value.trim();if(!text)return;document.getElementById('send').disabled=true;try{const r=await fetch('/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})});if(!r.ok)throw new Error(await r.text());input.value=''}catch(e){alert('Could not send instruction: '+e.message)}finally{document.getElementById('send').disabled=false;input.focus()}}
-document.getElementById('send').onclick=send;input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});document.getElementById('stop').onclick=async()=>{if(confirm('Stop the agent after the current operation?'))await fetch('/api/stop',{method:'POST'})};fetch('/api/state').then(r=>r.json()).then(s=>{paint(s);loadFiles(true)});const stream=new EventSource('/events');stream.onmessage=m=>addEvent(JSON.parse(m.data));stream.onerror=()=>document.getElementById('status').textContent='RECONNECTING';setInterval(()=>loadFiles(false),1800);
+const seen=new Set();
+const expanded=new Set();
+let selectedFile=null, currentTree=[], currentFilter='all', maxSteps=0, lastStep=0;
+const messages=document.getElementById('messages');
+const timeline=document.getElementById('timeline');
+const input=document.getElementById('input');
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
+function nearBottom(el,t=90){return el.scrollHeight-el.scrollTop-el.clientHeight<t}
+function basename(p){const parts=String(p||'').split('/');return parts[parts.length-1]||p}
+function extIcon(name){
+  const n=name.toLowerCase();
+  if(n.endsWith('.java'))return 'J'; if(n.endsWith('.xml'))return '<>'; if(n.endsWith('.json'))return '{}';
+  if(n.endsWith('.js')||n.endsWith('.ts'))return 'JS'; if(n.endsWith('.py'))return 'Py'; if(n.endsWith('.md'))return 'M';
+  if(n.endsWith('.properties')||n.endsWith('.yml')||n.endsWith('.yaml'))return '⚙'; return '·';
+}
+function isCurrentPath(path){const cwd=document.getElementById('currentDir').textContent||'.';return cwd!=='.'&&(path===cwd||path.startsWith(cwd+'/'))}
+
+function updateProgress(e){
+  if(e.max_steps)maxSteps=e.max_steps;
+  if(e.step)lastStep=Math.max(lastStep,e.step);
+  if(e.cwd)document.getElementById('currentDir').textContent=e.cwd;
+  if(maxSteps){const pct=Math.min(100,Math.round((lastStep/maxSteps)*100));document.getElementById('bar').style.width=pct+'%';document.getElementById('progressPct').textContent=pct+'%';document.getElementById('stepText').textContent=lastStep?`Step ${lastStep} / ${maxSteps}`:'Planning';}
+  if(e.kind==='finish'&&e.status==='success'){document.getElementById('bar').style.width='100%';document.getElementById('progressPct').textContent='100%';document.getElementById('stepText').textContent='Completed';}
+}
+
+function addChat(e){
+  const follow=nearBottom(messages);
+  const wrap=document.createElement('div');
+  wrap.className='msg '+(e.role==='user'?'user':e.kind==='chat'?'assistant':'system');
+  const who=e.role==='user'?'You':'Agent';
+  wrap.innerHTML=`<div class="avatar">${e.role==='user'?'Y':'AI'}</div><div class="bubble"><div class="who">${who}</div><div class="body">${esc(e.detail||e.title||'')}</div><div class="meta">${esc(e.timestamp||'')}</div></div>`;
+  messages.appendChild(wrap); if(follow)messages.scrollTo({top:messages.scrollHeight,behavior:'smooth'});
+}
+
+function eventMatches(e){if(currentFilter==='all')return true;if(currentFilter==='error')return e.status==='error'||e.status==='warning';if(currentFilter==='action')return ['action','result','loop','recovery','web_search'].includes(e.kind);return true}
+function renderTimelineFromState(events){timeline.innerHTML='';const filtered=events.filter(eventMatches);if(!filtered.length){timeline.innerHTML='<div class="empty">Nothing to show for this filter.</div>';return;}filtered.forEach(renderTimelineEvent)}
+function renderTimelineEvent(e){
+  const el=document.createElement('div');el.className='event '+(e.status||'info');
+  const detail=e.detail?`<details><summary>Show details</summary><div class="eventDetail">${esc(e.detail)}</div></details>`:'';
+  el.innerHTML=`<div class="eventTitle">${esc(e.title||e.kind)}</div>${e.cwd?`<div class="cwd">${esc(e.cwd)}</div>`:''}<div class="eventMeta">${e.step?`Step ${e.step} · `:''}${esc(e.timestamp||'')}</div>${detail}`;
+  timeline.appendChild(el);
+}
+function addTimeline(e){if(e.kind==='chat'||!eventMatches(e))return;const follow=nearBottom(timeline);if(timeline.querySelector('.empty'))timeline.innerHTML='';renderTimelineEvent(e);if(follow)timeline.scrollTo({top:timeline.scrollHeight,behavior:'smooth'});}
+function addEvent(e){if(seen.has(e.id))return;seen.add(e.id);updateProgress(e);if(e.kind==='chat'||e.kind==='guidance'||e.kind==='finish')addChat(e);addTimeline(e);if(['write_file','make_directory'].includes(e.action)||e.kind==='workspace')scheduleTreeRefresh();}
+
+function paint(s){
+  document.getElementById('provider').textContent=s.provider||'—';
+  document.getElementById('providerChip').textContent=s.provider||'—';
+  document.getElementById('currentDir').textContent=s.current_directory||'.';
+  document.getElementById('taskLine').textContent=s.task||'No task';
+  document.getElementById('explorerRoot').textContent=s.workspace||'Workspace';
+  const st=document.getElementById('status');const label=(s.status||'running').toUpperCase();st.textContent=label;document.getElementById('statusText').textContent=label;
+  if(s.status==='completed'){st.style.color='#43d49b';st.style.borderColor='rgba(67,212,155,.28)'}
+  if(s.status==='failed'){st.style.color='#ff6f7d';st.style.borderColor='rgba(255,111,125,.28)'}
+  (s.events||[]).forEach(addEvent);
+}
+
+function renderTree(nodes,depth=0,filter=''){
+  let html='';
+  for(const n of nodes){
+    const matches=!filter||n.name.toLowerCase().includes(filter)||n.path.toLowerCase().includes(filter);
+    const childMatch=n.type==='directory'&&containsMatch(n.children||[],filter);
+    if(filter&&!matches&&!childMatch)continue;
+    if(n.type==='directory'){
+      const open=filter?true:expanded.has(n.path);
+      html+=`<div class="treeRow ${isCurrentPath(n.path)?'current':''}" data-kind="dir" data-path="${esc(n.path)}"><span class="indent" style="width:${depth*14}px"></span><span class="twisty">${open?'▼':'▶'}</span><span class="fileIcon">▰</span><span class="treeName">${esc(n.name)}</span></div>`;
+      if(open)html+=renderTree(n.children||[],depth+1,filter);
+    }else{
+      html+=`<div class="treeRow ${selectedFile===n.path?'active':''} ${isCurrentPath(n.path)?'current':''}" data-kind="file" data-path="${esc(n.path)}"><span class="indent" style="width:${depth*14}px"></span><span class="twisty"></span><span class="fileIcon">${esc(extIcon(n.name))}</span><span class="treeName">${esc(n.name)}</span></div>`;
+    }
+  }
+  return html;
+}
+function containsMatch(nodes,filter){if(!filter)return true;for(const n of nodes){if(n.name.toLowerCase().includes(filter)||n.path.toLowerCase().includes(filter))return true;if(n.children&&containsMatch(n.children,filter))return true}return false}
+function bindTree(){document.querySelectorAll('.treeRow').forEach(row=>row.onclick=()=>{const path=row.dataset.path;if(row.dataset.kind==='dir'){expanded.has(path)?expanded.delete(path):expanded.add(path);drawTree()}else openFile(path)});}
+function drawTree(){const q=document.getElementById('fileFilter').value.trim().toLowerCase();const tree=document.getElementById('tree');tree.innerHTML='<div class="treeSection">Files</div>'+renderTree(currentTree,0,q);if(!currentTree.length)tree.innerHTML='<div class="treeEmpty">Workspace is empty.</div>';bindTree();}
+async function refreshTree(){try{const r=await fetch('/api/files/tree');if(!r.ok)throw new Error(await r.text());const data=await r.json();currentTree=data.tree||[];document.getElementById('explorerRoot').textContent=data.workspace||'Workspace';drawTree()}catch(e){document.getElementById('tree').innerHTML=`<div class="treeEmpty">${esc(e.message)}</div>`}}
+let treeTimer=null;function scheduleTreeRefresh(){clearTimeout(treeTimer);treeTimer=setTimeout(refreshTree,450)}
+
+function activateTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));document.getElementById('preview').classList.toggle('open',name!=='chat');}
+function addFileTab(path){
+  let tab=document.querySelector(`.tab[data-tab="file:${CSS.escape(path)}"]`);
+  if(!tab){tab=document.createElement('button');tab.className='tab';tab.dataset.tab='file:'+path;tab.innerHTML=`${esc(basename(path))}<span class="tabClose">×</span>`;document.getElementById('tabs').appendChild(tab);tab.onclick=(ev)=>{if(ev.target.classList.contains('tabClose')){ev.stopPropagation();tab.remove();selectedFile=null;activateTab('chat');drawTree();return}openFile(path)}}
+}
+async function openFile(path){selectedFile=path;drawTree();addFileTab(path);activateTab('file:'+path);document.getElementById('previewPath').textContent=path;document.getElementById('code').textContent='Loading…';try{const r=await fetch('/api/files/content?path='+encodeURIComponent(path));if(!r.ok)throw new Error(await r.text());const data=await r.json();document.getElementById('code').textContent=data.content||'';document.getElementById('previewBadge').textContent=data.truncated?'read-only · truncated':'read-only'}catch(e){document.getElementById('code').textContent='Could not load file: '+e.message}}
+document.querySelector('.tab[data-tab="chat"]').onclick=()=>activateTab('chat');
+
+document.getElementById('fileFilter').addEventListener('input',drawTree);
+document.getElementById('refreshFiles').onclick=refreshTree;
+document.querySelectorAll('.filterBtn').forEach(btn=>btn.onclick=async()=>{currentFilter=btn.dataset.filter;document.querySelectorAll('.filterBtn').forEach(b=>b.classList.toggle('active',b===btn));const s=await fetch('/api/state').then(r=>r.json());renderTimelineFromState(s.events||[])});
+
+async function send(){const text=input.value.trim();if(!text)return;const b=document.getElementById('send');b.disabled=true;try{const r=await fetch('/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})});if(!r.ok)throw new Error(await r.text());input.value=''}catch(e){alert('Could not send instruction: '+e.message)}finally{b.disabled=false;input.focus()}}
+document.getElementById('send').onclick=send;input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
+document.getElementById('stop').onclick=async()=>{if(confirm('Stop the agent after its current operation?'))await fetch('/api/stop',{method:'POST'})};
+
+fetch('/api/state').then(r=>r.json()).then(paint);refreshTree();setInterval(refreshTree,3000);
+const stream=new EventSource('/events');stream.onmessage=m=>addEvent(JSON.parse(m.data));stream.onerror=()=>document.getElementById('status').textContent='RECONNECTING';
 </script>
 </body>
 </html>
@@ -234,15 +398,15 @@ def create_app(store: ChatProgressStore) -> Flask:
     def state() -> Response:
         return jsonify(store.snapshot())
 
-    @app.get("/api/files")
-    def files() -> Response:
+    @app.get("/api/files/tree")
+    def files_tree() -> Response:
         try:
-            return jsonify({"tree": store.workspace_tree()})
+            return jsonify({"workspace": store.workspace, "tree": store.workspace_tree()})
         except Exception as exc:
             return jsonify({"error": str(exc)}), 500
 
-    @app.get("/api/file")
-    def file_preview() -> Response:
+    @app.get("/api/files/content")
+    def file_content() -> Response:
         relative_path = str(request.args.get("path", "")).strip()
         if not relative_path:
             return jsonify({"error": "path is required"}), 400
@@ -250,10 +414,8 @@ def create_app(store: ChatProgressStore) -> Flask:
             return jsonify(store.read_workspace_file(relative_path))
         except FileNotFoundError:
             return jsonify({"error": "file not found"}), 404
-        except ValueError as exc:
+        except Exception as exc:
             return jsonify({"error": str(exc)}), 400
-        except OSError as exc:
-            return jsonify({"error": str(exc)}), 500
 
     @app.post("/api/message")
     def message() -> Response:
@@ -283,7 +445,6 @@ def create_app(store: ChatProgressStore) -> Flask:
                 else:
                     yield ": keep-alive\n\n"
                 time.sleep(0.35)
-
         return Response(stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache"})
 
     return app
