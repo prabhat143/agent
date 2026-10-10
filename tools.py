@@ -95,6 +95,44 @@ class WorkspaceTools:
         )
         return output
 
+    def web_search(self, query: str, max_results: int = 5) -> str:
+        cleaned = query.strip()
+        if not cleaned:
+            raise ToolError("Search query cannot be empty.")
+        if len(cleaned) > 1000:
+            raise ToolError("Search query is too long.")
+
+        max_results = max(1, min(int(max_results), 8))
+
+        try:
+            from ddgs import DDGS
+        except ImportError as exc:
+            raise ToolError(
+                "Web search dependency is not installed. Run: pip install -r requirements.txt"
+            ) from exc
+
+        try:
+            results = list(DDGS().text(cleaned, max_results=max_results))
+        except Exception as exc:
+            raise ToolError(f"Web search failed: {exc}") from exc
+
+        if not results:
+            return f"No public web results found for: {cleaned}"
+
+        lines = [f"WEB SEARCH QUERY: {cleaned}", ""]
+        for index, item in enumerate(results, start=1):
+            title = str(item.get("title", "Untitled")).strip()
+            url = str(item.get("href") or item.get("url") or "").strip()
+            body = str(item.get("body") or item.get("snippet") or "").strip()
+            lines.append(f"[{index}] {title}")
+            if url:
+                lines.append(f"URL: {url}")
+            if body:
+                lines.append(f"SNIPPET: {body}")
+            lines.append("")
+
+        return "\n".join(lines).strip()
+
     @staticmethod
     def _validate_command(command: str) -> None:
         normalized = " ".join(command.lower().split())
@@ -123,10 +161,6 @@ class WorkspaceTools:
         except ValueError as exc:
             raise ToolError(f"Invalid command quoting: {exc}") from exc
 
-        # subprocess.run is called with shell=False, so shell metacharacters inside
-        # a quoted argument (for example Python code containing ';') are harmless.
-        # We only reject shell-control tokens when they survive tokenization as
-        # standalone arguments.
         blocked_tokens = {"&&", "||", ";", "|", ">", "<", "`", "$("}
         if any(token in blocked_tokens for token in argv):
             raise ToolError(
