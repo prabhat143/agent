@@ -118,7 +118,17 @@ class WorkspaceTools:
         if any(fragment in normalized for fragment in blocked_fragments):
             raise ToolError("Command blocked by the local safety policy.")
 
-        if any(token in command for token in ("&&", "||", ";", "|", ">", "<", "`", "$(")):
+        try:
+            argv = shlex.split(command)
+        except ValueError as exc:
+            raise ToolError(f"Invalid command quoting: {exc}") from exc
+
+        # subprocess.run is called with shell=False, so shell metacharacters inside
+        # a quoted argument (for example Python code containing ';') are harmless.
+        # We only reject shell-control tokens when they survive tokenization as
+        # standalone arguments.
+        blocked_tokens = {"&&", "||", ";", "|", ">", "<", "`", "$("}
+        if any(token in blocked_tokens for token in argv):
             raise ToolError(
                 "Shell operators/redirection are disabled. Use run_command with a separate cwd instead of 'cd ... && ...'."
             )
