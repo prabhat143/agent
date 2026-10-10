@@ -5,7 +5,6 @@ import os
 from typing import Protocol
 
 import requests
-from openai import OpenAI
 
 from agent_config import AgentConfig
 
@@ -19,6 +18,14 @@ class OpenAIResponsesClient:
     def __init__(self, config: AgentConfig) -> None:
         if not os.getenv("OPENAI_API_KEY"):
             raise RuntimeError("OPENAI_API_KEY is required when AGENT_PROVIDER=openai.")
+
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "OpenAI support is optional. Install it with: pip install openai"
+            ) from exc
+
         self.client = OpenAI()
         self.model = config.openai_model
 
@@ -36,6 +43,15 @@ class OllamaClient:
         self.url = f"{config.ollama_base_url}/api/chat"
         self.model = config.ollama_model
 
+    @staticmethod
+    def _requires_json(system: str) -> bool:
+        text = system.lower()
+        return (
+            "return only a json object" in text
+            or "return json only" in text
+            or "exactly one tool action" in text
+        )
+
     def complete(self, system: str, user: str) -> str:
         payload = {
             "model": self.model,
@@ -47,9 +63,14 @@ class OllamaClient:
             "options": {"temperature": 0.1},
         }
 
+        # Plans and chat can remain natural language, but autonomous tool decisions
+        # must be machine-readable. Ollama's JSON mode significantly reduces cases
+        # where a local model returns prose or a JSON object without the expected
+        # action envelope.
+        if self._requires_json(system):
+            payload["format"] = "json"
+
         try:
-            # Local coding models can take several minutes on the first request,
-            # especially larger models such as qwen3-coder:30B.
             response = requests.post(self.url, json=payload, timeout=(10, 600))
         except requests.exceptions.ConnectTimeout as exc:
             raise RuntimeError(
