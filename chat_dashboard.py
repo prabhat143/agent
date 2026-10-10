@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 import webbrowser
@@ -59,7 +60,7 @@ class ChatProgressStore:
             "kind": "guidance",
             "title": "Instruction queued",
             "status": "warning",
-            "detail": "Your instruction will be applied before the next reasoning step.",
+            "detail": "Your guidance will be applied before the next reasoning step.",
         })
 
     def drain_instructions(self) -> list[str]:
@@ -126,7 +127,6 @@ class ChatProgressStore:
                 children = sorted(directory.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
             except (OSError, PermissionError):
                 return nodes
-
             for child in children:
                 if child.name in IGNORED_DIRS or child.name.startswith(".DS_Store"):
                     continue
@@ -171,216 +171,108 @@ HTML = r"""
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>PTA Agent Workspace</title>
+<title>PTA Autonomous Developer</title>
 <style>
 :root{
-  color-scheme:dark;
-  --bg:#0b0d11;--surface:#101319;--surface2:#151922;--surface3:#1a1f29;
-  --line:#242a35;--line2:#303846;--text:#eef2f7;--muted:#8e98a8;
-  --accent:#8b7cff;--accent2:#64b5ff;--ok:#43d49b;--warn:#f4bd62;--bad:#ff6f7d;
-  --shadow:0 16px 44px rgba(0,0,0,.28);
+  color-scheme:dark;--bg:#07101d;--bg2:#0a1322;--panel:#0d1726;--panel2:#101c2d;--panel3:#132137;
+  --line:#22324a;--line2:#2e4362;--text:#f4f7fb;--muted:#91a0b7;--blue:#2d8cff;--blue2:#5eb8ff;
+  --purple:#8a5cf6;--green:#3dd598;--orange:#f4ad47;--red:#ff6577;--shadow:0 12px 35px rgba(0,0,0,.26)
 }
-*{box-sizing:border-box}
-html,body{margin:0;width:100%;height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-body{overflow:hidden}
-button,input,textarea{font:inherit}
-button{cursor:pointer}
-.app{display:grid;grid-template-columns:260px minmax(0,1fr) 350px;width:100%;height:100dvh;min-height:0;overflow:hidden}
-
-/* Explorer */
-.explorer{display:flex;flex-direction:column;min-width:0;min-height:0;background:#0e1116;border-right:1px solid var(--line)}
-.explorerTop{padding:14px 13px 11px;border-bottom:1px solid var(--line);background:#0f1218}
-.eyebrow{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#697485}
-.workspaceTitle{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px}
-.workspaceTitle strong{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.iconBtn{width:28px;height:28px;display:grid;place-items:center;background:transparent;border:1px solid transparent;border-radius:8px;color:#9da7b7}
-.iconBtn:hover{background:var(--surface2);border-color:var(--line)}
-.rootPath{font-size:10px;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fileSearch{padding:9px 10px;border-bottom:1px solid var(--line)}
-.fileSearch input{width:100%;height:31px;border:1px solid var(--line);border-radius:8px;background:#0b0e13;color:var(--text);outline:0;padding:0 10px;font-size:11px}
-.fileSearch input:focus{border-color:#4b5568}
-.tree{flex:1;min-height:0;overflow:auto;padding:7px 5px 18px;font-size:12px;user-select:none;scrollbar-gutter:stable}
-.treeSection{padding:7px 9px 4px;color:#667184;font-size:9px;font-weight:800;letter-spacing:.11em;text-transform:uppercase}
-.treeRow{height:28px;display:flex;align-items:center;gap:5px;padding-right:6px;border-radius:7px;cursor:pointer;white-space:nowrap;min-width:max-content;color:#cbd2dc}
-.treeRow:hover{background:#151922}.treeRow.active{background:#202631;color:#fff}.treeRow.current{box-shadow:inset 2px 0 0 var(--accent2)}
-.indent{display:inline-block;flex:0 0 auto}.twisty{width:14px;text-align:center;color:#798495;font-size:9px}.fileIcon{width:16px;text-align:center;color:#8792a3}.treeName{overflow:hidden;text-overflow:ellipsis;max-width:185px}.treeEmpty{padding:20px 10px;color:var(--muted);font-size:11px;text-align:center}
-
-/* Main */
-.main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg);border-right:1px solid var(--line)}
-.topbar{height:60px;flex:0 0 60px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 18px;border-bottom:1px solid var(--line);background:rgba(11,13,17,.96)}
-.brandWrap{min-width:0}.brand{font-size:14px;font-weight:800}.taskLine{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:650px}
-.topActions{display:flex;align-items:center;gap:8px}.providerChip{font-size:10px;color:#b9c4d3;border:1px solid var(--line);background:#10141b;padding:6px 8px;border-radius:999px}.status{font-size:10px;font-weight:850;padding:6px 9px;border:1px solid rgba(100,181,255,.26);border-radius:999px;color:var(--accent2);background:rgba(100,181,255,.08)}
-.tabs{height:38px;flex:0 0 38px;display:flex;align-items:end;padding:0 12px;border-bottom:1px solid var(--line);background:#0e1116;overflow-x:auto}
-.tab{height:33px;display:flex;align-items:center;gap:7px;padding:0 11px;border:0;border-bottom:2px solid transparent;background:transparent;color:#8f99a8;font-size:11px;white-space:nowrap}.tab.active{color:#eef2f7;border-bottom-color:var(--accent)}.tabClose{opacity:.6;font-size:12px}.tabClose:hover{opacity:1}
-.content{position:relative;flex:1 1 auto;min-height:0;overflow:hidden}
-.messages{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:24px 28px 30px;scrollbar-gutter:stable}
-.msg{max-width:820px;margin:0 auto 19px;display:grid;grid-template-columns:28px minmax(0,1fr);gap:11px}.avatar{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:#202630;color:#dfe6f0;font-size:10px;font-weight:800}.msg.user .avatar{background:#2b2545;color:#ddd5ff}.bubble{min-width:0}.who{font-size:11px;font-weight:800;margin:1px 0 6px}.body{font-size:13px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;color:#dfe5ed}.msg.user .body{color:#f0f2f6}.msg.system .body{color:#b4becc}.meta{font-size:9px;color:#667184;margin-top:5px}
-.preview{position:absolute;inset:0;display:none;flex-direction:column;background:#0d1015}.preview.open{display:flex}.previewMeta{height:34px;flex:0 0 34px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 13px;border-bottom:1px solid var(--line);background:#10141a}.breadcrumb{font:10px ui-monospace,SFMono-Regular,Menlo,monospace;color:#9ba8bb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.previewBadge{font-size:9px;color:#7d899a}.code{flex:1;min-height:0;overflow:auto;margin:0;padding:18px 20px 30px;background:#0d1015;color:#d6dde8;font:12px/1.62 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;white-space:pre;tab-size:4;scrollbar-gutter:stable}
-.composerWrap{flex:0 0 auto;padding:12px 18px 16px;background:linear-gradient(180deg,rgba(11,13,17,.3),#0b0d11 32%)}
-.composer{max-width:860px;margin:auto;background:#12161d;border:1px solid #2e3541;border-radius:16px;padding:10px 10px 9px;box-shadow:var(--shadow)}
-textarea{width:100%;min-height:54px;max-height:150px;resize:vertical;background:transparent;border:0;outline:0;color:var(--text);padding:5px 7px;font-size:13px;line-height:1.5}.composerFoot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 3px 0}.hint{font-size:10px;color:#707b8c}.buttons{display:flex;gap:7px}.send,.stop{border-radius:9px;padding:7px 11px;font-size:11px;font-weight:800}.send{border:0;background:#eef1f5;color:#101216}.send:hover{background:#fff}.stop{background:#22171b;color:#ff9ca6;border:1px solid #4d2931}.stop:hover{background:#2b1b20}
-
-/* Activity */
-.activity{display:flex;flex-direction:column;min-width:0;min-height:0;background:#0e1116}
-.activityTop{padding:14px;border-bottom:1px solid var(--line)}.activityHeader{display:flex;align-items:center;justify-content:space-between;gap:10px}.activityHeader strong{font-size:13px}.liveDot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent2);margin-right:6px;box-shadow:0 0 0 4px rgba(100,181,255,.08)}
-.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px}.summary{min-width:0;padding:9px;background:#11151c;border:1px solid var(--line);border-radius:9px}.summary span{display:block;font-size:9px;color:#697486;text-transform:uppercase;letter-spacing:.06em}.summary b{display:block;margin-top:3px;font-size:11px;color:#dce3ec;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.summary.wide{grid-column:1/-1}
-.progressHead{display:flex;align-items:center;justify-content:space-between;margin-top:11px;font-size:9px;color:#788394}.progress{height:5px;background:#1b2029;border-radius:999px;overflow:hidden;margin-top:6px}.bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:.25s}
-.filterBar{display:flex;gap:5px;padding:9px 11px;border-bottom:1px solid var(--line)}.filterBtn{border:1px solid transparent;background:transparent;color:#7f8998;border-radius:7px;padding:5px 8px;font-size:10px}.filterBtn.active{background:#181d25;border-color:#2b323e;color:#dfe5ee}
-.timeline{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px 10px 18px;scrollbar-gutter:stable}.event{position:relative;padding:10px 10px 10px 29px;border-radius:10px;margin-bottom:5px}.event:hover{background:#12161d}.event:before{content:"";position:absolute;left:12px;top:15px;width:7px;height:7px;border-radius:50%;background:#697486}.event:after{content:"";position:absolute;left:15px;top:23px;bottom:-7px;width:1px;background:#252b35}.event:last-child:after{display:none}.event.success:before{background:var(--ok)}.event.error:before{background:var(--bad)}.event.warning:before{background:var(--warn)}.event.running:before{background:var(--accent2)}
-.eventTitle{font-size:11px;font-weight:750;line-height:1.4;color:#dce2eb}.eventMeta{font-size:9px;color:#687384;margin-top:4px}.cwd{font:9px ui-monospace,SFMono-Regular,Menlo,monospace;color:#91a8d4;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.event details{margin-top:6px}.event summary{font-size:9px;color:#778395;cursor:pointer;list-style:none}.event summary::-webkit-details-marker{display:none}.eventDetail{font-size:10px;color:#9ca7b6;line-height:1.45;margin-top:6px;white-space:pre-wrap;max-height:170px;overflow:auto;border-left:2px solid #252c37;padding-left:8px}.empty{padding:28px 12px;text-align:center;color:#6e7989;font-size:11px}
-
-::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#2e3541;border-radius:999px;border:2px solid transparent;background-clip:padding-box}::-webkit-scrollbar-track{background:transparent}
-@media(max-width:1180px){.app{grid-template-columns:225px minmax(0,1fr) 310px}.treeName{max-width:155px}}
-@media(max-width:900px){body{overflow:auto}.app{display:flex;flex-direction:column;height:auto;min-height:100dvh;overflow:visible}.explorer{height:300px;flex:0 0 300px;border-right:0;border-bottom:1px solid var(--line)}.main{height:100dvh;min-height:650px;border-right:0}.activity{height:520px;border-top:1px solid var(--line)}}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{overflow:hidden}
+button,input,textarea,select{font:inherit}.app{height:100dvh;display:grid;grid-template-rows:76px minmax(0,1fr);background:linear-gradient(180deg,#08111f 0,#07101d 100%)}
+.topbar{display:flex;align-items:center;gap:18px;padding:0 22px;border-bottom:1px solid var(--line);background:rgba(8,17,31,.96)}
+.brandBlock{display:flex;align-items:center;min-width:360px;gap:12px}.logo{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--purple),#6f3df0);display:grid;place-items:center;font-weight:900;box-shadow:0 0 26px rgba(138,92,246,.28)}.brand{font-size:17px;font-weight:800}.tagline{font-size:11px;color:var(--muted);margin-top:2px}.topSpacer{flex:1}
+.topControl{height:38px;border:1px solid var(--line);background:#0b1625;color:#dfe7f3;border-radius:9px;padding:0 13px;display:flex;align-items:center;gap:7px;font-size:12px}.topControl b{color:#fff}.statusPill{color:var(--green);font-weight:800}.statusDot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 10px rgba(61,213,152,.5)}
+.primary{background:linear-gradient(180deg,#258cff,#1978e8);border:1px solid #429eff;color:#fff;border-radius:9px;height:38px;padding:0 15px;font-weight:750;cursor:pointer}.secondary{background:#0f1a2a;border:1px solid var(--line);color:#e4eaf3;border-radius:9px;height:38px;padding:0 14px;font-weight:700;cursor:pointer}.iconBtn{width:38px;height:38px;border-radius:9px;border:1px solid var(--line);background:#0f1a2a;color:#bac7d9;cursor:pointer}
+.workspaceGrid{min-height:0;display:grid;grid-template-columns:390px minmax(0,1fr) 400px}.left,.right,.center{min-height:0;overflow:hidden}.left{border-right:1px solid var(--line);background:#091321;display:flex;flex-direction:column}.center{border-right:1px solid var(--line);background:#08111e;display:flex;flex-direction:column}.right{background:#091321;display:flex;flex-direction:column}
+.leftTop{padding:14px;border-bottom:1px solid var(--line)}.sectionTitle{font-size:12px;font-weight:800;letter-spacing:.04em;color:#eaf0f8;margin-bottom:10px}.projectRow{display:flex;gap:8px}.projectSelect{flex:1;min-width:0;border:1px solid var(--line2);background:#0d1a2a;border-radius:9px;padding:10px 12px;color:#eef3fb}.miniBtn{width:38px;border-radius:8px;border:1px solid var(--line2);background:#122137;color:#c9d4e5;cursor:pointer}
+.navList{padding:10px 12px;border-bottom:1px solid var(--line)}.navItem{height:36px;border-radius:7px;padding:0 12px;display:flex;align-items:center;gap:10px;color:#b5c1d3;font-size:13px}.navItem.active{background:linear-gradient(90deg,rgba(45,140,255,.18),rgba(45,140,255,.08));color:#64b2ff;border-left:2px solid var(--blue)}
+.filesHead{display:flex;align-items:center;justify-content:space-between;padding:13px 15px 8px}.filesTitle{font-size:12px;font-weight:800;color:#dbe4f1}.filesActions{display:flex;gap:8px}.smallIcon{border:0;background:transparent;color:#8fa1b8;cursor:pointer;font-size:15px}.filterWrap{padding:0 12px 10px}.filter{width:100%;height:36px;border-radius:8px;border:1px solid var(--line);background:#0a1524;color:#e8eef7;padding:0 11px;outline:none}.filter::placeholder{color:#687b95}.tree{flex:1;min-height:0;overflow:auto;padding:3px 7px 18px;font-size:12px}.treeRow{height:28px;display:flex;align-items:center;gap:6px;border-radius:6px;cursor:pointer;white-space:nowrap;min-width:max-content;color:#cbd5e5}.treeRow:hover{background:#101e31}.treeRow.active{background:linear-gradient(90deg,#153f78,#102d52);color:#fff}.indent{display:inline-block;flex:0 0 auto}.twisty{width:13px;text-align:center;color:#8292aa;font-size:10px}.fileIcon{width:16px;text-align:center;color:#7ea8ff}.javaIcon{color:#d36bff}.treeName{max-width:260px;overflow:hidden;text-overflow:ellipsis}.treeEmpty{padding:18px;color:var(--muted)}
+.tabs{height:48px;display:flex;align-items:stretch;border-bottom:1px solid var(--line);background:#091321;overflow-x:auto;overflow-y:hidden}.tab{display:flex;align-items:center;gap:8px;min-width:max-content;padding:0 18px;border-right:1px solid var(--line);color:#9fb0c6;font-size:12px;cursor:pointer;position:relative}.tab.active{color:#fff;background:#0c1726}.tab.active:before{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:var(--blue)}.tab .x{color:#6c7f99}.chatTab{min-width:74px;justify-content:center}.plusTab{width:44px;justify-content:center}
+.breadcrumb{height:40px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);font-size:11px;color:#8295ae;background:#0b1523}.crumb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.readOnly{margin-left:auto;border:1px solid var(--line);background:#101d2f;border-radius:7px;padding:5px 8px;color:#aab8cb}
+.mainViewport{flex:1;min-height:0;position:relative;overflow:hidden}.chatPane,.codePane{position:absolute;inset:0;overflow:auto}.chatPane{padding:28px 24px 130px}.chatPane.hidden,.codePane.hidden{display:none}.codePane{background:#08111e}.codeWrap{display:grid;grid-template-columns:48px minmax(0,1fr);min-height:100%;font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}.lineNums{padding:18px 8px;text-align:right;color:#4d617c;border-right:1px solid #17263a;white-space:pre;user-select:none;background:#091421}.code{padding:18px 20px;margin:0;white-space:pre;overflow:auto;color:#e1e8f4}.chatMsg{max-width:820px;margin:0 auto 20px;display:grid;grid-template-columns:36px minmax(0,1fr);gap:12px}.avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;background:#18253a;color:#e8eff9}.chatMsg.user .avatar{background:linear-gradient(135deg,#6d48f3,#8e60ff)}.msgCard{border:1px solid var(--line);background:#0d1828;border-radius:12px;padding:13px 15px;line-height:1.55;font-size:13px;color:#dde5f1}.chatMsg.user .msgCard{background:linear-gradient(135deg,rgba(92,64,190,.48),rgba(53,39,116,.5));border-color:#4b3c85}.who{font-size:11px;color:#8fa0b6;font-weight:750;margin-bottom:7px}.msgTime{font-size:9px;color:#60738e;margin-top:8px}.planCard{margin-top:10px;padding-top:10px;border-top:1px solid #22334c}
+.composerWrap{position:absolute;left:50%;transform:translateX(-50%);bottom:16px;width:min(860px,calc(100% - 42px));z-index:8}.composer{background:#0d1828;border:1px solid #2c3d57;border-radius:13px;box-shadow:var(--shadow);padding:11px}.composer textarea{width:100%;min-height:58px;max-height:150px;resize:none;border:0;outline:0;background:transparent;color:#eef4fb;padding:4px;font-size:13px}.composerActions{display:flex;align-items:center;justify-content:space-between;margin-top:7px}.composerMeta{font-size:10px;color:#70839d}.sendRow{display:flex;align-items:center;gap:8px}.mode{border:1px solid var(--line);background:#101d2f;color:#b9c7d8;border-radius:8px;height:34px;padding:0 10px}.stopBtn{height:34px;border-radius:8px;border:1px solid #633240;background:#301a23;color:#ff9bac;font-weight:750;padding:0 12px;cursor:pointer}.sendBtn{height:34px;border-radius:8px;border:1px solid #439cff;background:#2489ff;color:#fff;font-weight:800;padding:0 15px;cursor:pointer}
+.rightTabs{height:48px;border-bottom:1px solid var(--line);display:flex;background:#091321}.rTab{height:48px;padding:0 17px;display:flex;align-items:center;color:#8fa0b7;font-size:12px;cursor:pointer;position:relative}.rTab.active{color:#62b2ff}.rTab.active:after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:2px;background:#3c9aff}.rightBody{flex:1;min-height:0;overflow:hidden;position:relative}.activityPane,.terminalPane,.logsPane{position:absolute;inset:0;overflow:auto}.activityPane.hidden,.terminalPane.hidden,.logsPane.hidden{display:none}.activityTop{padding:14px;border-bottom:1px solid var(--line)}.runCard{border:1px solid var(--line);background:#0d1928;border-radius:10px;padding:12px}.runLine{display:flex;align-items:center;gap:8px}.runText{font-size:13px;font-weight:800;color:var(--green)}.runStep{margin-left:auto;font-size:10px;color:#8799b0}.progress{height:5px;border-radius:999px;background:#17243a;overflow:hidden;margin-top:10px}.bar{height:100%;width:0;background:linear-gradient(90deg,#29d4b3,#28b7ff);transition:.3s}.cwdBox{margin-top:11px;padding-top:10px;border-top:1px solid #20314a;font-size:10px;color:#73869f}.cwdValue{color:#53abff;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:4px;overflow-wrap:anywhere}
+.filters{display:flex;gap:7px;padding:12px 14px 7px}.filterBtn{border:1px solid var(--line);background:#0e1a2a;color:#8295ae;border-radius:8px;padding:6px 10px;font-size:10px;cursor:pointer}.filterBtn.active{background:#187ee8;color:#fff;border-color:#278fff}.timeline{padding:5px 14px 18px}.event{display:grid;grid-template-columns:24px minmax(0,1fr);gap:9px;padding:8px 0;position:relative}.event:not(:last-child):before{content:"";position:absolute;left:11px;top:28px;bottom:-4px;width:1px;background:#1e314a}.eventIcon{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:10px;background:#23354d;color:#a8b8cb;z-index:1}.event.success .eventIcon{background:#173c35;color:#55e4b8}.event.error .eventIcon{background:#44202a;color:#ff8292}.event.warning .eventIcon{background:#43351d;color:#ffca6f}.event.running .eventIcon{background:#173c66;color:#62b6ff}.eventTitle{font-size:11px;font-weight:750;color:#e5ebf5}.eventDetail{font-size:10px;color:#788ba3;line-height:1.45;margin-top:3px;white-space:pre-wrap;max-height:90px;overflow:auto}.eventMeta{font-size:9px;color:#4f6580;margin-top:4px}.terminalPane,.logsPane{padding:14px;background:#07101c}.terminalHeader{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.terminalTitle{font-size:12px;font-weight:800}.terminalOut,.logsOut{border:1px solid var(--line);background:#050b13;border-radius:8px;padding:12px;min-height:240px;color:#9ed0ff;font:10px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow:auto}.logsOut{color:#a9b8ca}
+::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#263a55;border-radius:999px;border:2px solid transparent;background-clip:padding-box}::-webkit-scrollbar-track{background:transparent}
+@media(max-width:1350px){.workspaceGrid{grid-template-columns:320px minmax(0,1fr) 350px}.brandBlock{min-width:300px}}@media(max-width:1050px){.workspaceGrid{grid-template-columns:280px minmax(0,1fr)}.right{display:none}.topControl:nth-of-type(2){display:none}}@media(max-width:760px){body{overflow:auto}.app{height:auto;min-height:100dvh}.topbar{flex-wrap:wrap;height:auto;padding:12px}.brandBlock{min-width:0}.workspaceGrid{display:flex;flex-direction:column}.left{height:360px}.center{height:780px}.right{display:flex;height:620px}.topControl,.secondary,.iconBtn{display:none}}
 </style>
 </head>
 <body>
 <div class="app">
-  <aside class="explorer">
-    <div class="explorerTop">
-      <div class="eyebrow">Explorer</div>
-      <div class="workspaceTitle"><strong>Workspace</strong><button id="refreshFiles" class="iconBtn" title="Refresh files">↻</button></div>
-      <div id="explorerRoot" class="rootPath">Loading…</div>
-    </div>
-    <div class="fileSearch"><input id="fileFilter" placeholder="Filter files…" /></div>
-    <div id="tree" class="tree"><div class="treeEmpty">Loading workspace…</div></div>
-  </aside>
+  <header class="topbar">
+    <div class="brandBlock"><div class="logo">AI</div><div><div class="brand">PTA Autonomous Developer</div><div class="tagline">Build, test and ship with AI</div></div></div>
+    <div class="topSpacer"></div>
+    <div class="topControl">Provider: <b id="providerTop">—</b></div>
+    <div class="topControl">Model: <b id="modelTop">local</b> ▾</div>
+    <div class="topControl statusPill"><span class="statusDot"></span><span id="statusTop">RUNNING</span></div>
+    <button class="primary" title="Project creation wiring comes next">＋ New Project</button>
+    <button class="secondary" title="Project opening wiring comes next">Open Project</button>
+    <button class="iconBtn" title="Settings">⚙</button>
+  </header>
 
-  <main class="main">
-    <div class="topbar">
-      <div class="brandWrap"><div class="brand">PTA Autonomous Developer</div><div id="taskLine" class="taskLine">Waiting for task…</div></div>
-      <div class="topActions"><span id="providerChip" class="providerChip">ollama</span><span id="status" class="status">CONNECTING</span></div>
-    </div>
-    <div id="tabs" class="tabs"><button class="tab active" data-tab="chat">Chat</button></div>
-    <section class="content">
-      <div id="messages" class="messages"></div>
-      <div id="preview" class="preview">
-        <div class="previewMeta"><div id="previewPath" class="breadcrumb"></div><div id="previewBadge" class="previewBadge">read-only</div></div>
-        <pre id="code" class="code"></pre>
-      </div>
-    </section>
-    <div class="composerWrap">
-      <div class="composer">
-        <textarea id="input" placeholder="Guide the agent, correct it, or ask it to change direction…"></textarea>
-        <div class="composerFoot"><div class="hint">Enter to send · Shift+Enter for a new line</div><div class="buttons"><button id="stop" class="stop">Stop</button><button id="send" class="send">Send</button></div></div>
-      </div>
-    </div>
-  </main>
+  <div class="workspaceGrid">
+    <aside class="left">
+      <div class="leftTop"><div class="sectionTitle">Projects</div><div class="projectRow"><select id="projectSelect" class="projectSelect"><option>workspace</option></select><button class="miniBtn">＋</button></div></div>
+      <div class="navList"><div class="navItem active">▣ Workspace</div><div class="navItem">⌕ Search</div><div class="navItem">⑂ Git <span style="color:#5d708a;font-size:10px">(soon)</span></div></div>
+      <div class="filesHead"><div class="filesTitle">Files</div><div class="filesActions"><button id="refreshFiles" class="smallIcon">↻</button><button class="smallIcon">▽</button></div></div>
+      <div class="filterWrap"><input id="fileFilter" class="filter" placeholder="Search files..." /></div>
+      <div id="tree" class="tree"><div class="treeEmpty">Loading workspace...</div></div>
+    </aside>
 
-  <aside class="activity">
-    <div class="activityTop">
-      <div class="activityHeader"><strong><span class="liveDot"></span>Live activity</strong><span id="stepText" style="font-size:10px;color:#788394">Waiting</span></div>
-      <div class="summaryGrid">
-        <div class="summary"><span>Provider</span><b id="provider">—</b></div>
-        <div class="summary"><span>Status</span><b id="statusText">—</b></div>
-        <div class="summary wide"><span>Current directory</span><b id="currentDir">.</b></div>
+    <main class="center">
+      <div id="tabs" class="tabs"><div class="tab chatTab active" data-chat="1">Chat</div><div class="tab plusTab">＋</div></div>
+      <div id="breadcrumb" class="breadcrumb"><span class="crumb">Chat with the agent while it builds</span></div>
+      <div class="mainViewport">
+        <div id="chatPane" class="chatPane"></div>
+        <div id="codePane" class="codePane hidden"><div class="codeWrap"><div id="lineNums" class="lineNums"></div><pre id="code" class="code"></pre></div></div>
+        <div class="composerWrap"><div class="composer"><textarea id="input" placeholder="Type a message to the agent..."></textarea><div class="composerActions"><div class="composerMeta">Your guidance is applied before the next reasoning step.</div><div class="sendRow"><select class="mode"><option>Auto</option></select><button id="stop" class="stopBtn">Stop</button><button id="send" class="sendBtn">Send</button></div></div></div></div>
       </div>
-      <div class="progressHead"><span>Run progress</span><span id="progressPct">0%</span></div>
-      <div class="progress"><div id="bar" class="bar"></div></div>
-    </div>
-    <div class="filterBar"><button class="filterBtn active" data-filter="all">All</button><button class="filterBtn" data-filter="error">Errors</button><button class="filterBtn" data-filter="action">Actions</button></div>
-    <div id="timeline" class="timeline"><div class="empty">No activity yet.</div></div>
-  </aside>
+    </main>
+
+    <aside class="right">
+      <div class="rightTabs"><div class="rTab active" data-pane="activity">Live Activity</div><div class="rTab" data-pane="terminal">Terminal</div><div class="rTab" data-pane="logs">Logs</div></div>
+      <div class="rightBody">
+        <div id="activityPane" class="activityPane">
+          <div class="activityTop"><div class="runCard"><div class="runLine"><span class="statusDot"></span><span id="runStatus" class="runText">Running</span><span id="runStep" class="runStep">Waiting...</span></div><div class="progress"><div id="bar" class="bar"></div></div><div class="cwdBox">Current directory<div id="currentDir" class="cwdValue">.</div></div></div></div>
+          <div class="filters"><button class="filterBtn active" data-filter="all">All</button><button class="filterBtn" data-filter="action">Actions</button><button class="filterBtn" data-filter="error">Errors</button><button class="filterBtn" data-filter="web_search">Search</button></div>
+          <div id="timeline" class="timeline"></div>
+        </div>
+        <div id="terminalPane" class="terminalPane hidden"><div class="terminalHeader"><div class="terminalTitle">Latest Command Output</div><button id="clearTerminal" class="filterBtn">Clear</button></div><pre id="terminalOut" class="terminalOut">No command output yet.</pre></div>
+        <div id="logsPane" class="logsPane hidden"><div class="terminalHeader"><div class="terminalTitle">Agent Logs</div></div><pre id="logsOut" class="logsOut">Waiting for events...</pre></div>
+      </div>
+    </aside>
+  </div>
 </div>
 <script>
 const seen=new Set();
-const expanded=new Set();
-let selectedFile=null, currentTree=[], currentFilter='all', maxSteps=0, lastStep=0;
-const messages=document.getElementById('messages');
-const timeline=document.getElementById('timeline');
-const input=document.getElementById('input');
-
+const chatPane=document.getElementById('chatPane'),tree=document.getElementById('tree'),timeline=document.getElementById('timeline');
+const codePane=document.getElementById('codePane'),code=document.getElementById('code'),lineNums=document.getElementById('lineNums'),input=document.getElementById('input');
+const tabs=document.getElementById('tabs'),breadcrumb=document.getElementById('breadcrumb');
+let maxSteps=0,lastStep=0,currentFilter='all',latestCommandOutput='No command output yet.',allEvents=[],treeData=[],openFiles=[],activeFile=null;
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 function nearBottom(el,t=90){return el.scrollHeight-el.scrollTop-el.clientHeight<t}
-function basename(p){const parts=String(p||'').split('/');return parts[parts.length-1]||p}
-function extIcon(name){
-  const n=name.toLowerCase();
-  if(n.endsWith('.java'))return 'J'; if(n.endsWith('.xml'))return '<>'; if(n.endsWith('.json'))return '{}';
-  if(n.endsWith('.js')||n.endsWith('.ts'))return 'JS'; if(n.endsWith('.py'))return 'Py'; if(n.endsWith('.md'))return 'M';
-  if(n.endsWith('.properties')||n.endsWith('.yml')||n.endsWith('.yaml'))return '⚙'; return '·';
-}
-function isCurrentPath(path){const cwd=document.getElementById('currentDir').textContent||'.';return cwd!=='.'&&(path===cwd||path.startsWith(cwd+'/'))}
-
-function updateProgress(e){
-  if(e.max_steps)maxSteps=e.max_steps;
-  if(e.step)lastStep=Math.max(lastStep,e.step);
-  if(e.cwd)document.getElementById('currentDir').textContent=e.cwd;
-  if(maxSteps){const pct=Math.min(100,Math.round((lastStep/maxSteps)*100));document.getElementById('bar').style.width=pct+'%';document.getElementById('progressPct').textContent=pct+'%';document.getElementById('stepText').textContent=lastStep?`Step ${lastStep} / ${maxSteps}`:'Planning';}
-  if(e.kind==='finish'&&e.status==='success'){document.getElementById('bar').style.width='100%';document.getElementById('progressPct').textContent='100%';document.getElementById('stepText').textContent='Completed';}
-}
-
-function addChat(e){
-  const follow=nearBottom(messages);
-  const wrap=document.createElement('div');
-  wrap.className='msg '+(e.role==='user'?'user':e.kind==='chat'?'assistant':'system');
-  const who=e.role==='user'?'You':'Agent';
-  wrap.innerHTML=`<div class="avatar">${e.role==='user'?'Y':'AI'}</div><div class="bubble"><div class="who">${who}</div><div class="body">${esc(e.detail||e.title||'')}</div><div class="meta">${esc(e.timestamp||'')}</div></div>`;
-  messages.appendChild(wrap); if(follow)messages.scrollTo({top:messages.scrollHeight,behavior:'smooth'});
-}
-
-function eventMatches(e){if(currentFilter==='all')return true;if(currentFilter==='error')return e.status==='error'||e.status==='warning';if(currentFilter==='action')return ['action','result','loop','recovery','web_search'].includes(e.kind);return true}
-function renderTimelineFromState(events){timeline.innerHTML='';const filtered=events.filter(eventMatches);if(!filtered.length){timeline.innerHTML='<div class="empty">Nothing to show for this filter.</div>';return;}filtered.forEach(renderTimelineEvent)}
-function renderTimelineEvent(e){
-  const el=document.createElement('div');el.className='event '+(e.status||'info');
-  const detail=e.detail?`<details><summary>Show details</summary><div class="eventDetail">${esc(e.detail)}</div></details>`:'';
-  el.innerHTML=`<div class="eventTitle">${esc(e.title||e.kind)}</div>${e.cwd?`<div class="cwd">${esc(e.cwd)}</div>`:''}<div class="eventMeta">${e.step?`Step ${e.step} · `:''}${esc(e.timestamp||'')}</div>${detail}`;
-  timeline.appendChild(el);
-}
-function addTimeline(e){if(e.kind==='chat'||!eventMatches(e))return;const follow=nearBottom(timeline);if(timeline.querySelector('.empty'))timeline.innerHTML='';renderTimelineEvent(e);if(follow)timeline.scrollTo({top:timeline.scrollHeight,behavior:'smooth'});}
-function addEvent(e){if(seen.has(e.id))return;seen.add(e.id);updateProgress(e);if(e.kind==='chat'||e.kind==='guidance'||e.kind==='finish')addChat(e);addTimeline(e);if(['write_file','make_directory'].includes(e.action)||e.kind==='workspace')scheduleTreeRefresh();}
-
-function paint(s){
-  document.getElementById('provider').textContent=s.provider||'—';
-  document.getElementById('providerChip').textContent=s.provider||'—';
-  document.getElementById('currentDir').textContent=s.current_directory||'.';
-  document.getElementById('taskLine').textContent=s.task||'No task';
-  document.getElementById('explorerRoot').textContent=s.workspace||'Workspace';
-  const st=document.getElementById('status');const label=(s.status||'running').toUpperCase();st.textContent=label;document.getElementById('statusText').textContent=label;
-  if(s.status==='completed'){st.style.color='#43d49b';st.style.borderColor='rgba(67,212,155,.28)'}
-  if(s.status==='failed'){st.style.color='#ff6f7d';st.style.borderColor='rgba(255,111,125,.28)'}
-  (s.events||[]).forEach(addEvent);
-}
-
-function renderTree(nodes,depth=0,filter=''){
-  let html='';
-  for(const n of nodes){
-    const matches=!filter||n.name.toLowerCase().includes(filter)||n.path.toLowerCase().includes(filter);
-    const childMatch=n.type==='directory'&&containsMatch(n.children||[],filter);
-    if(filter&&!matches&&!childMatch)continue;
-    if(n.type==='directory'){
-      const open=filter?true:expanded.has(n.path);
-      html+=`<div class="treeRow ${isCurrentPath(n.path)?'current':''}" data-kind="dir" data-path="${esc(n.path)}"><span class="indent" style="width:${depth*14}px"></span><span class="twisty">${open?'▼':'▶'}</span><span class="fileIcon">▰</span><span class="treeName">${esc(n.name)}</span></div>`;
-      if(open)html+=renderTree(n.children||[],depth+1,filter);
-    }else{
-      html+=`<div class="treeRow ${selectedFile===n.path?'active':''} ${isCurrentPath(n.path)?'current':''}" data-kind="file" data-path="${esc(n.path)}"><span class="indent" style="width:${depth*14}px"></span><span class="twisty"></span><span class="fileIcon">${esc(extIcon(n.name))}</span><span class="treeName">${esc(n.name)}</span></div>`;
-    }
-  }
-  return html;
-}
-function containsMatch(nodes,filter){if(!filter)return true;for(const n of nodes){if(n.name.toLowerCase().includes(filter)||n.path.toLowerCase().includes(filter))return true;if(n.children&&containsMatch(n.children,filter))return true}return false}
-function bindTree(){document.querySelectorAll('.treeRow').forEach(row=>row.onclick=()=>{const path=row.dataset.path;if(row.dataset.kind==='dir'){expanded.has(path)?expanded.delete(path):expanded.add(path);drawTree()}else openFile(path)});}
-function drawTree(){const q=document.getElementById('fileFilter').value.trim().toLowerCase();const tree=document.getElementById('tree');tree.innerHTML='<div class="treeSection">Files</div>'+renderTree(currentTree,0,q);if(!currentTree.length)tree.innerHTML='<div class="treeEmpty">Workspace is empty.</div>';bindTree();}
-async function refreshTree(){try{const r=await fetch('/api/files/tree');if(!r.ok)throw new Error(await r.text());const data=await r.json();currentTree=data.tree||[];document.getElementById('explorerRoot').textContent=data.workspace||'Workspace';drawTree()}catch(e){document.getElementById('tree').innerHTML=`<div class="treeEmpty">${esc(e.message)}</div>`}}
-let treeTimer=null;function scheduleTreeRefresh(){clearTimeout(treeTimer);treeTimer=setTimeout(refreshTree,450)}
-
-function activateTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));document.getElementById('preview').classList.toggle('open',name!=='chat');}
-function addFileTab(path){
-  let tab=document.querySelector(`.tab[data-tab="file:${CSS.escape(path)}"]`);
-  if(!tab){tab=document.createElement('button');tab.className='tab';tab.dataset.tab='file:'+path;tab.innerHTML=`${esc(basename(path))}<span class="tabClose">×</span>`;document.getElementById('tabs').appendChild(tab);tab.onclick=(ev)=>{if(ev.target.classList.contains('tabClose')){ev.stopPropagation();tab.remove();selectedFile=null;activateTab('chat');drawTree();return}openFile(path)}}
-}
-async function openFile(path){selectedFile=path;drawTree();addFileTab(path);activateTab('file:'+path);document.getElementById('previewPath').textContent=path;document.getElementById('code').textContent='Loading…';try{const r=await fetch('/api/files/content?path='+encodeURIComponent(path));if(!r.ok)throw new Error(await r.text());const data=await r.json();document.getElementById('code').textContent=data.content||'';document.getElementById('previewBadge').textContent=data.truncated?'read-only · truncated':'read-only'}catch(e){document.getElementById('code').textContent='Could not load file: '+e.message}}
-document.querySelector('.tab[data-tab="chat"]').onclick=()=>activateTab('chat');
-
-document.getElementById('fileFilter').addEventListener('input',drawTree);
-document.getElementById('refreshFiles').onclick=refreshTree;
-document.querySelectorAll('.filterBtn').forEach(btn=>btn.onclick=async()=>{currentFilter=btn.dataset.filter;document.querySelectorAll('.filterBtn').forEach(b=>b.classList.toggle('active',b===btn));const s=await fetch('/api/state').then(r=>r.json());renderTimelineFromState(s.events||[])});
-
-async function send(){const text=input.value.trim();if(!text)return;const b=document.getElementById('send');b.disabled=true;try{const r=await fetch('/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})});if(!r.ok)throw new Error(await r.text());input.value=''}catch(e){alert('Could not send instruction: '+e.message)}finally{b.disabled=false;input.focus()}}
-document.getElementById('send').onclick=send;input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
-document.getElementById('stop').onclick=async()=>{if(confirm('Stop the agent after its current operation?'))await fetch('/api/stop',{method:'POST'})};
-
-fetch('/api/state').then(r=>r.json()).then(paint);refreshTree();setInterval(refreshTree,3000);
-const stream=new EventSource('/events');stream.onmessage=m=>addEvent(JSON.parse(m.data));stream.onerror=()=>document.getElementById('status').textContent='RECONNECTING';
+function statusSymbol(s,k){if(s==='success')return '✓';if(s==='error')return '!';if(s==='warning')return '↻';if(k==='web_search')return '⌕';if(k==='thinking')return '◇';return '▶'}
+function updateProgress(e){if(e.max_steps)maxSteps=e.max_steps;if(e.step)lastStep=Math.max(lastStep,e.step);if(e.cwd)document.getElementById('currentDir').textContent=e.cwd;if(maxSteps){document.getElementById('bar').style.width=Math.min(100,(lastStep/maxSteps)*100)+'%';document.getElementById('runStep').textContent=`Step ${lastStep} of ${maxSteps}`}if(e.kind==='finish'){document.getElementById('bar').style.width=e.status==='success'?'100%':document.getElementById('bar').style.width;document.getElementById('runStatus').textContent=e.status==='success'?'Completed':'Stopped'}}
+function addChat(e){const follow=nearBottom(chatPane);const wrap=document.createElement('div');wrap.className='chatMsg '+(e.role==='user'?'user':'assistant');const who=e.role==='user'?'You':'Agent';wrap.innerHTML=`<div class="avatar">${e.role==='user'?'Y':'AI'}</div><div><div class="who">${who}</div><div class="msgCard">${esc(e.detail||e.title||'')}</div><div class="msgTime">${esc(e.timestamp||'')}</div></div>`;chatPane.appendChild(wrap);if(follow)chatPane.scrollTo({top:chatPane.scrollHeight,behavior:'smooth'})}
+function eventMatches(e){if(currentFilter==='all')return true;if(currentFilter==='error')return e.status==='error';if(currentFilter==='action')return ['action','result','workspace','finish','guidance'].includes(e.kind);return e.kind===currentFilter||e.action===currentFilter}
+function renderTimeline(){timeline.innerHTML='';allEvents.filter(eventMatches).forEach(e=>{if(e.kind==='chat')return;const el=document.createElement('div');el.className='event '+(e.status||'info');el.innerHTML=`<div class="eventIcon">${statusSymbol(e.status,e.kind)}</div><div><div class="eventTitle">${esc(e.title||e.kind)}</div>${e.detail?`<div class="eventDetail">${esc(e.detail)}</div>`:''}<div class="eventMeta">${e.step?`Step ${e.step} · `:''}${e.cwd?`cwd: ${esc(e.cwd)} · `:''}${esc(e.timestamp||'')}</div></div>`;timeline.appendChild(el)});timeline.scrollTop=timeline.scrollHeight}
+function addEvent(e){if(seen.has(e.id))return;seen.add(e.id);allEvents.push(e);updateProgress(e);if(e.kind==='chat'||e.kind==='guidance'||e.kind==='finish')addChat(e);if(e.action==='run_command'&&e.kind==='result'){latestCommandOutput=e.detail||'';document.getElementById('terminalOut').textContent=latestCommandOutput}document.getElementById('logsOut').textContent=allEvents.map(x=>`[${x.timestamp||''}] ${x.title||x.kind}${x.detail?`\n${x.detail}`:''}`).join('\n\n');renderTimeline();if(['write_file','make_directory'].includes(e.action)&&e.kind==='result')loadFiles(false)}
+function paint(s){document.getElementById('providerTop').textContent=s.provider||'—';document.getElementById('statusTop').textContent=(s.status||'running').toUpperCase();document.getElementById('runStatus').textContent=(s.status||'running').replace(/^./,c=>c.toUpperCase());document.getElementById('currentDir').textContent=s.current_directory||'.';(s.events||[]).forEach(addEvent)}
+function fileIcon(name){if(name.endsWith('.java'))return '<span class="fileIcon javaIcon">J</span>';if(name.endsWith('.xml'))return '<span class="fileIcon">◇</span>';if(name.endsWith('.properties')||name.endsWith('.yml')||name.endsWith('.yaml'))return '<span class="fileIcon">⚙</span>';return '<span class="fileIcon">·</span>'}
+function projectNameFromTree(nodes){const first=(nodes||[]).find(n=>n.type==='directory');return first?first.name:'workspace'}
+function renderProjectSelect(nodes){const sel=document.getElementById('projectSelect');const dirs=(nodes||[]).filter(n=>n.type==='directory');sel.innerHTML=dirs.length?dirs.map(d=>`<option>${esc(d.name)}</option>`).join(''):'<option>workspace</option>'}
+function renderTree(nodes,filter=''){tree.innerHTML='';const term=filter.trim().toLowerCase();function walk(list,depth){for(const n of list){const childMatch=n.type==='directory'&&n.children?.some(c=>JSON.stringify(c).toLowerCase().includes(term));const match=!term||n.name.toLowerCase().includes(term)||childMatch;if(!match)continue;const row=document.createElement('div');row.className='treeRow'+(activeFile===n.path?' active':'');row.dataset.path=n.path;row.dataset.type=n.type;row.innerHTML=`<span class="indent" style="width:${depth*15}px"></span>${n.type==='directory'?`<span class="twisty">${term?'▾':'▸'}</span><span class="fileIcon">▰</span>`:fileIcon(n.name)}<span class="treeName">${esc(n.name)}</span>`;tree.appendChild(row);if(n.type==='directory'){let expanded=term?true:row.dataset.expanded==='1';row.onclick=()=>{expanded=!expanded;row.dataset.expanded=expanded?'1':'0';row.querySelector('.twisty').textContent=expanded?'▾':'▸';let p=row.nextSibling;while(p&&Number(p.dataset.depth||0)>depth){p.style.display=expanded?'flex':'none';p=p.nextSibling}};const startCount=tree.children.length;walk(n.children||[],depth+1);for(let i=startCount;i<tree.children.length;i++){tree.children[i].dataset.depth=depth+1;tree.children[i].style.display=term?'flex':'none'}}else row.onclick=()=>openFile(n.path)}}walk(nodes,0);if(!tree.children.length)tree.innerHTML='<div class="treeEmpty">No matching files.</div>'}
+async function loadFiles(showLoading=true){if(showLoading)tree.innerHTML='<div class="treeEmpty">Loading workspace...</div>';try{const r=await fetch('/api/files');const data=await r.json();treeData=data.files||[];renderProjectSelect(treeData);renderTree(treeData,document.getElementById('fileFilter').value)}catch(e){tree.innerHTML='<div class="treeEmpty">Could not load workspace.</div>'}}
+function renderTabs(){tabs.innerHTML='<div class="tab chatTab" data-chat="1">Chat</div>';for(const f of openFiles){const t=document.createElement('div');t.className='tab'+(activeFile===f.path?' active':'');t.innerHTML=`<span class="javaIcon">J</span>${esc(f.name)} <span class="x">×</span>`;t.onclick=(ev)=>{if(ev.target.classList.contains('x')){ev.stopPropagation();closeFile(f.path)}else showFile(f.path)};tabs.appendChild(t)}const plus=document.createElement('div');plus.className='tab plusTab';plus.textContent='＋';tabs.appendChild(plus);const chat=tabs.querySelector('[data-chat="1"]');if(!activeFile)chat.classList.add('active');chat.onclick=showChat}
+function showChat(){activeFile=null;chatPane.classList.remove('hidden');codePane.classList.add('hidden');breadcrumb.innerHTML='<span class="crumb">Chat with the agent while it builds</span>';renderTabs();renderTree(treeData,document.getElementById('fileFilter').value)}
+async function openFile(path){if(!openFiles.find(f=>f.path===path))openFiles.push({path,name:path.split('/').pop()});await showFile(path)}
+async function showFile(path){activeFile=path;chatPane.classList.add('hidden');codePane.classList.remove('hidden');code.textContent='Loading...';lineNums.textContent='';renderTabs();renderTree(treeData,document.getElementById('fileFilter').value);try{const r=await fetch('/api/file?path='+encodeURIComponent(path));const data=await r.json();if(!r.ok)throw new Error(data.error||'Unable to read file');code.textContent=data.content||'';const lines=(data.content||'').split('\n').length;lineNums.textContent=Array.from({length:lines},(_,i)=>i+1).join('\n');breadcrumb.innerHTML=`<span class="crumb">${esc(path.split('/').join(' › '))}</span><span class="readOnly">Read only</span>`}catch(e){code.textContent='Unable to preview file: '+e.message}}
+function closeFile(path){openFiles=openFiles.filter(f=>f.path!==path);if(activeFile===path){if(openFiles.length)showFile(openFiles[openFiles.length-1].path);else showChat()}else renderTabs()}
+async function send(){const text=input.value.trim();if(!text)return;document.getElementById('send').disabled=true;try{const r=await fetch('/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})});if(!r.ok)throw new Error(await r.text());input.value='';showChat()}catch(e){alert('Could not send instruction: '+e.message)}finally{document.getElementById('send').disabled=false;input.focus()}}
+document.getElementById('send').onclick=send;input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});document.getElementById('stop').onclick=async()=>{if(confirm('Stop the agent after the current operation?'))await fetch('/api/stop',{method:'POST'})};document.getElementById('refreshFiles').onclick=()=>loadFiles();document.getElementById('fileFilter').oninput=e=>renderTree(treeData,e.target.value);document.getElementById('clearTerminal').onclick=()=>{latestCommandOutput='';document.getElementById('terminalOut').textContent=''};
+document.querySelectorAll('.filterBtn[data-filter]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.filterBtn[data-filter]').forEach(x=>x.classList.remove('active'));b.classList.add('active');currentFilter=b.dataset.filter;renderTimeline()});document.querySelectorAll('.rTab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.rTab').forEach(x=>x.classList.remove('active'));t.classList.add('active');['activity','terminal','logs'].forEach(p=>document.getElementById(p+'Pane').classList.toggle('hidden',p!==t.dataset.pane))});
+renderTabs();fetch('/api/state').then(r=>r.json()).then(paint);loadFiles();setInterval(()=>loadFiles(false),3000);const stream=new EventSource('/events');stream.onmessage=m=>addEvent(JSON.parse(m.data));stream.onerror=()=>document.getElementById('statusTop').textContent='RECONNECTING';
 </script>
 </body>
 </html>
@@ -389,6 +281,7 @@ const stream=new EventSource('/events');stream.onmessage=m=>addEvent(JSON.parse(
 
 def create_app(store: ChatProgressStore) -> Flask:
     app = Flask(__name__)
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
     @app.get("/")
     def index() -> Response:
@@ -398,20 +291,20 @@ def create_app(store: ChatProgressStore) -> Flask:
     def state() -> Response:
         return jsonify(store.snapshot())
 
-    @app.get("/api/files/tree")
-    def files_tree() -> Response:
+    @app.get("/api/files")
+    def files() -> Response:
         try:
-            return jsonify({"workspace": store.workspace, "tree": store.workspace_tree()})
+            return jsonify({"files": store.workspace_tree(), "workspace": store.workspace})
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return jsonify({"error": str(exc), "files": []}), 500
 
-    @app.get("/api/files/content")
-    def file_content() -> Response:
-        relative_path = str(request.args.get("path", "")).strip()
-        if not relative_path:
+    @app.get("/api/file")
+    def file_preview() -> Response:
+        path = str(request.args.get("path", "")).strip()
+        if not path:
             return jsonify({"error": "path is required"}), 400
         try:
-            return jsonify(store.read_workspace_file(relative_path))
+            return jsonify(store.read_workspace_file(path))
         except FileNotFoundError:
             return jsonify({"error": "file not found"}), 404
         except Exception as exc:
@@ -450,12 +343,7 @@ def create_app(store: ChatProgressStore) -> Flask:
     return app
 
 
-def start_chat_dashboard(
-    store: ChatProgressStore,
-    host: str = "127.0.0.1",
-    port: int = 8765,
-    open_browser: bool = True,
-) -> threading.Thread:
+def start_chat_dashboard(store: ChatProgressStore, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> threading.Thread:
     app = create_app(store)
 
     def run() -> None:
