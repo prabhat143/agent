@@ -3,3 +3,4 @@ python-dotenv>=1.0.1
 requests>=2.32.0
 pytest>=8.0.0
 flask>=3.0.0
+ddgs>=9.0.0
