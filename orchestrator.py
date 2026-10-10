@@ -10,19 +10,54 @@ from llm_clients import LLMClient
 from tools import ToolError, WorkspaceTools
 
 
-SYSTEM_PROMPT = """You are an autonomous senior software engineer operating inside a restricted local workspace.
+ALLOWED_ACTIONS = (
+    "list_files",
+    "read_file",
+    "write_file",
+    "make_directory",
+    "run_command",
+    "web_search",
+    "finish",
+)
+
+ACTION_CONTRACT = """ACTION CONTRACT — choose EXACTLY ONE action from this list:
+
+1. list_files
+{"action":"list_files","args":{"path":"."},"reason":"why this is the next step"}
+
+2. read_file
+{"action":"read_file","args":{"path":"relative/path"},"reason":"why this file must be inspected"}
+
+3. write_file
+{"action":"write_file","args":{"path":"relative/path","content":"COMPLETE FILE CONTENTS AS A STRING"},"reason":"why this file must be created or replaced"}
+
+4. make_directory
+{"action":"make_directory","args":{"path":"relative/path"},"reason":"why this directory is needed"}
+
+5. run_command
+{"action":"run_command","args":{"command":"single executable command without shell chaining","cwd":"relative/project/directory"},"reason":"why this command should run"}
+
+6. web_search
+{"action":"web_search","args":{"query":"public technical question or exact error","max_results":5},"reason":"why current web research is needed"}
+
+7. finish
+{"action":"finish","args":{"summary":"what was completed","verification":"specific evidence that proves it works"},"reason":"why the task is complete"}
+
+MANDATORY RESPONSE RULES:
+- The top-level JSON object MUST contain the key "action".
+- "action" MUST be exactly one of: list_files, read_file, write_file, make_directory, run_command, web_search, finish.
+- The top-level JSON object MUST contain an "args" object.
+- Return exactly one JSON object and nothing else.
+- Never return an explanation instead of an action.
+- Never invent another action name.
+"""
+
+SYSTEM_PROMPT = f"""You are an autonomous senior software engineer operating inside a restricted local workspace.
 Your job is to complete the user's software task, not merely explain how to do it.
 
 You may use exactly one tool action per turn. Return ONLY a JSON object, with no markdown.
 
-Allowed actions:
-1. {"action":"list_files","args":{"path":"."},"reason":"..."}
-2. {"action":"read_file","args":{"path":"relative/path"},"reason":"..."}
-3. {"action":"write_file","args":{"path":"relative/path","content":"complete file contents"},"reason":"..."}
-4. {"action":"make_directory","args":{"path":"relative/path"},"reason":"..."}
-5. {"action":"run_command","args":{"command":"single command without pipes/redirection","cwd":"relative/project/directory"},"reason":"..."}
-6. {"action":"web_search","args":{"query":"exact public technical question or error","max_results":5},"reason":"..."}
-7. {"action":"finish","args":{"summary":"what was completed","verification":"what proves it works"},"reason":"..."}
+{ACTION_CONTRACT}
 
 Rules:
 - Inspect before making assumptions about an existing project.
@@ -155,19 +190,12 @@ class AutonomousDeveloper:
             self.progress(f"\n[step {step}/{self.config.max_steps}] Thinking about the next action...")
             self._event("thinking", "AI is deciding the next action", status="running", step=step)
             prompt = self._build_turn_prompt(task, plan, initial_listing, history, guidance, step)
+
             try:
-                raw = self.llm.complete(SYSTEM_PROMPT, prompt)
+                decision = self._request_valid_decision(prompt, step)
             except Exception as exc:
                 self._event("model", "Model request failed", status="error", detail=str(exc), step=step)
                 raise
-
-            try:
-                decision = self._parse_decision(raw)
-            except ValueError as exc:
-                self.progress(f"[step {step}] Model returned invalid action JSON: {exc}")
-                self._event("model", "Invalid model response; retrying", status="warning", detail=str(exc), step=step)
-                history.append({"step": step, "action": "invalid_model_output", "observation": str(exc), "raw": raw[:2000]})
-                continue
 
             action = decision["action"]
             args = decision.get("args", {})
@@ -298,6 +326,62 @@ class AutonomousDeveloper:
         self.progress(f"[agent] Reached maximum step limit: {self.config.max_steps}")
         self._event("finish", "Maximum step limit reached", status="error", detail=f"Stopped after {self.config.max_steps} steps.", step=self.config.max_steps)
         return AgentResult(False, f"Stopped after reaching the configured step limit ({self.config.max_steps}).", "Review the final observations and increase AGENT_MAX_STEPS if appropriate.", self.config.max_steps, history)
+
+    def _request_valid_decision(self, prompt: str, step: int) -> dict[str, Any]:
+        current_prompt = prompt
+        last_error = ""
+        last_raw = ""
+
+        for attempt in range(1, 4):
+            raw = self.llm.complete(SYSTEM_PROMPT, current_prompt)
+            last_raw = raw
+            try:
+                return self._parse_decision(raw)
+            except ValueError as exc:
+                last_error = str(exc)
+                self.progress(
+                    f"[step {step}] Invalid model decision (repair {attempt}/3): {last_error}"
+                )
+                self._event(
+                    "model",
+                    "Invalid model decision; repairing",
+                    status="warning",
+                    detail=f"Attempt {attempt}/3: {last_error}",
+                    step=step,
+                )
+                current_prompt = self._build_repair_prompt(prompt, raw, last_error)
+
+        self.progress(
+            f"[step {step}] Model could not produce a valid action after 3 repairs; using safe workspace inspection fallback."
+        )
+        self._event(
+            "model",
+            "Model decision repair exhausted",
+            status="warning",
+            detail=(
+                f"Last error: {last_error}\n\n"
+                f"Last response: {self._shorten(last_raw, 1200)}\n\n"
+                "Fallback action: list_files(.)"
+            ),
+            step=step,
+        )
+        return {
+            "action": "list_files",
+            "args": {"path": "."},
+            "reason": "Safe fallback after the model failed to produce a valid action envelope.",
+        }
+
+    @staticmethod
+    def _build_repair_prompt(original_prompt: str, raw: str, error: str) -> str:
+        return (
+            f"{original_prompt}\n\n"
+            "YOUR PREVIOUS RESPONSE WAS INVALID. FIX THE RESPONSE FORMAT NOW.\n\n"
+            f"Validation error:\n{error}\n\n"
+            f"Previous response:\n{raw[:3000]}\n\n"
+            f"{ACTION_CONTRACT}\n\n"
+            "Do not explain the mistake. Do not continue the task in prose. "
+            "Return one corrected JSON action object only."
+        )
 
     @staticmethod
     def _action_fingerprint(action: str, args: dict[str, Any]) -> str:
@@ -446,10 +530,46 @@ class AutonomousDeveloper:
             raise ValueError(f"Model did not return valid JSON: {exc}") from exc
         if not isinstance(decision, dict):
             raise ValueError("Model response must be a JSON object.")
-        if decision.get("action") not in {"list_files", "read_file", "write_file", "make_directory", "run_command", "web_search", "finish"}:
-            raise ValueError(f"Unsupported model action: {decision.get('action')!r}")
-        if "args" in decision and not isinstance(decision["args"], dict):
-            raise ValueError("'args' must be a JSON object.")
+
+        action = decision.get("action")
+        if action not in ALLOWED_ACTIONS:
+            raise ValueError(
+                f"Unsupported model action: {action!r}. Allowed actions: {', '.join(ALLOWED_ACTIONS)}"
+            )
+
+        args = decision.get("args")
+        if not isinstance(args, dict):
+            raise ValueError("'args' is required and must be a JSON object.")
+
+        reason = decision.get("reason", "")
+        if reason is not None and not isinstance(reason, str):
+            raise ValueError("'reason' must be a string when provided.")
+
+        if action == "write_file":
+            if not isinstance(args.get("path"), str) or not args.get("path", "").strip():
+                raise ValueError("write_file requires args.path as a non-empty string.")
+            if not isinstance(args.get("content"), str):
+                raise ValueError("write_file requires args.content as a string containing complete file contents.")
+        elif action == "run_command":
+            if not isinstance(args.get("command"), str) or not args.get("command", "").strip():
+                raise ValueError("run_command requires args.command as a non-empty string.")
+            if "cwd" in args and not isinstance(args.get("cwd"), str):
+                raise ValueError("run_command args.cwd must be a string when provided.")
+        elif action == "web_search":
+            if not isinstance(args.get("query"), str) or not args.get("query", "").strip():
+                raise ValueError("web_search requires args.query as a non-empty string.")
+        elif action in {"read_file", "make_directory"}:
+            if not isinstance(args.get("path"), str) or not args.get("path", "").strip():
+                raise ValueError(f"{action} requires args.path as a non-empty string.")
+        elif action == "list_files":
+            if "path" in args and not isinstance(args.get("path"), str):
+                raise ValueError("list_files args.path must be a string when provided.")
+        elif action == "finish":
+            if not isinstance(args.get("summary"), str):
+                raise ValueError("finish requires args.summary as a string.")
+            if "verification" in args and not isinstance(args.get("verification"), str):
+                raise ValueError("finish args.verification must be a string when provided.")
+
         return decision
 
     @staticmethod
@@ -483,5 +603,6 @@ class AutonomousDeveloper:
             f"INITIAL WORKSPACE:\n{initial_listing}\n\n"
             f"CURRENT STEP: {step}\n\n"
             f"RECENT ACTIONS AND OBSERVATIONS:\n{json.dumps(recent_history, indent=2, ensure_ascii=False)}\n\n"
-            "Choose the single best next action. Return JSON only."
+            f"{ACTION_CONTRACT}\n\n"
+            "Choose the single best next action now. Return exactly one JSON object only."
         )
