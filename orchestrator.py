@@ -20,7 +20,7 @@ Allowed actions:
 2. {"action":"read_file","args":{"path":"relative/path"},"reason":"..."}
 3. {"action":"write_file","args":{"path":"relative/path","content":"complete file contents"},"reason":"..."}
 4. {"action":"make_directory","args":{"path":"relative/path"},"reason":"..."}
-5. {"action":"run_command","args":{"command":"single command without pipes/redirection"},"reason":"..."}
+5. {"action":"run_command","args":{"command":"single command without pipes/redirection","cwd":"relative/project/directory"},"reason":"..."}
 6. {"action":"finish","args":{"summary":"what was completed","verification":"what proves it works"},"reason":"..."}
 
 Rules:
@@ -29,6 +29,8 @@ Rules:
 - Prefer complete, production-quality edits over fragments.
 - After editing code, run the relevant build/tests/linter when available.
 - If a command or test fails, diagnose the observed error and fix it.
+- NEVER use `cd some-dir && command`. Shell chaining is blocked. Instead set run_command.args.cwd to the target directory and put only the executable command in args.command.
+- NEVER repeat an identical failing action. Change the action, arguments, cwd, or implementation based on the observed error.
 - Do not claim success without verification when verification is possible.
 - Stay inside the workspace.
 - Never request secrets or embed API keys in source files.
@@ -80,6 +82,7 @@ class AutonomousDeveloper:
         step: int | None = None,
         action: str | None = None,
         target: str | None = None,
+        cwd: str | None = None,
     ) -> None:
         self.event_callback({
             "kind": kind,
@@ -89,6 +92,7 @@ class AutonomousDeveloper:
             "step": step,
             "action": action,
             "target": target,
+            "cwd": cwd,
             "max_steps": self.config.max_steps,
         })
 
@@ -111,12 +115,24 @@ class AutonomousDeveloper:
         guidance: list[str] = []
         initial_listing = self.tools.list_files(".")
         self.progress(f"[workspace] Initial files: {self._shorten(initial_listing, 500)}")
-        self._event("workspace", "Workspace inspected", status="success", detail=self._shorten(initial_listing, 2000))
+        self._event(
+            "workspace",
+            "Workspace inspected",
+            status="success",
+            detail=self._shorten(initial_listing, 2000),
+            cwd=".",
+        )
 
         for step in range(1, self.config.max_steps + 1):
             if self.stop_requested():
                 self.progress("[agent] Stop requested by user.")
-                self._event("finish", "Agent stopped by user", status="error", detail="Stopped safely before the next reasoning step.", step=step)
+                self._event(
+                    "finish",
+                    "Agent stopped by user",
+                    status="error",
+                    detail="Stopped safely before the next reasoning step.",
+                    step=step,
+                )
                 return AgentResult(False, "Stopped by user.", "No further actions were executed after the stop request.", step - 1, history)
 
             new_guidance = self.instruction_source()
@@ -149,12 +165,48 @@ class AutonomousDeveloper:
             args = decision.get("args", {})
             reason = decision.get("reason", "")
             target = self._action_target(action, args)
+            cwd = str(args.get("cwd", ".")) if action == "run_command" else None
+
+            repeated = self._repeated_failure_count(history, action, args)
+            if repeated >= 2:
+                observation = (
+                    "REPEATED_ACTION_BLOCKED: This exact action already failed twice. "
+                    "Do not repeat it. Change the command, cwd, file, or implementation based on the previous error."
+                )
+                self.progress(f"[step {step}] {observation}")
+                self._event(
+                    "loop",
+                    "Repeated failing action blocked",
+                    status="warning",
+                    detail=observation,
+                    step=step,
+                    action=action,
+                    target=target,
+                    cwd=cwd,
+                )
+                history.append({
+                    "step": step,
+                    "action": action,
+                    "args": self._safe_args_for_history(action, args),
+                    "reason": reason,
+                    "observation": observation,
+                })
+                continue
 
             self.progress(f"[step {step}] Action: {action}")
             if reason:
                 self.progress(f"[step {step}] Why   : {reason}")
             self._report_action_details(step, action, args)
-            self._event("action", self._action_title(action, target), status="running", detail=reason, step=step, action=action, target=target)
+            self._event(
+                "action",
+                self._action_title(action, target, cwd),
+                status="running",
+                detail=reason,
+                step=step,
+                action=action,
+                target=target,
+                cwd=cwd,
+            )
 
             if action == "finish":
                 summary = str(args.get("summary", "Task completed."))
@@ -163,22 +215,42 @@ class AutonomousDeveloper:
                 if verification:
                     self.progress(f"[verify] {verification}")
                 self._event("chat", "Agent", status="info", detail=f"Completed.\n\n{summary}\n\nVerification: {verification}".strip())
-                self._event("finish", "Agent marked task complete", status="success", detail=f"{summary}\n\nVerification: {verification}".strip(), step=step, action=action)
+                self._event(
+                    "finish",
+                    "Agent marked task complete",
+                    status="success",
+                    detail=f"{summary}\n\nVerification: {verification}".strip(),
+                    step=step,
+                    action=action,
+                )
                 history.append({"step": step, "action": action, "reason": reason})
                 return AgentResult(True, summary, verification, step, history)
 
             self.progress(f"[step {step}] Executing {action}...")
             try:
                 observation = self._execute(action, args)
-                event_status = "success"
-                event_title = f"{action} completed"
+                if action == "run_command" and "exit_code=0" not in observation:
+                    event_status = "error"
+                    event_title = f"{action} returned a non-zero exit code"
+                else:
+                    event_status = "success"
+                    event_title = f"{action} completed"
             except (ToolError, ValueError, TypeError) as exc:
                 observation = f"TOOL_ERROR: {exc}"
                 event_status = "error"
                 event_title = f"{action} failed"
 
             self.progress(f"[step {step}] Result : {self._shorten(observation, 1200)}")
-            self._event("result", event_title, status=event_status, detail=self._shorten(observation, 4000), step=step, action=action, target=target)
+            self._event(
+                "result",
+                event_title,
+                status=event_status,
+                detail=self._shorten(observation, 4000),
+                step=step,
+                action=action,
+                target=target,
+                cwd=cwd,
+            )
             history.append({
                 "step": step,
                 "action": action,
@@ -192,6 +264,18 @@ class AutonomousDeveloper:
         return AgentResult(False, f"Stopped after reaching the configured step limit ({self.config.max_steps}).", "Review the final observations and increase AGENT_MAX_STEPS if appropriate.", self.config.max_steps, history)
 
     @staticmethod
+    def _repeated_failure_count(history: list[dict[str, Any]], action: str, args: dict[str, Any]) -> int:
+        safe_args = AutonomousDeveloper._safe_args_for_history(action, args)
+        count = 0
+        for item in reversed(history[-8:]):
+            if item.get("action") != action or item.get("args") != safe_args:
+                continue
+            observation = str(item.get("observation", ""))
+            if "TOOL_ERROR:" in observation or "exit_code=" in observation and "exit_code=0" not in observation or "REPEATED_ACTION_BLOCKED" in observation:
+                count += 1
+        return count
+
+    @staticmethod
     def _action_target(action: str, args: dict[str, Any]) -> str | None:
         if action in {"read_file", "write_file", "make_directory", "list_files"}:
             return str(args.get("path", "."))
@@ -200,15 +284,25 @@ class AutonomousDeveloper:
         return None
 
     @staticmethod
-    def _action_title(action: str, target: str | None) -> str:
-        labels = {"list_files": "Inspecting files", "read_file": "Reading file", "write_file": "Writing file", "make_directory": "Creating directory", "run_command": "Running command", "finish": "Finishing task"}
+    def _action_title(action: str, target: str | None, cwd: str | None = None) -> str:
+        labels = {
+            "list_files": "Inspecting files",
+            "read_file": "Reading file",
+            "write_file": "Writing file",
+            "make_directory": "Creating directory",
+            "run_command": "Running command",
+            "finish": "Finishing task",
+        }
         title = labels.get(action, action)
+        if action == "run_command" and target:
+            return f"{title} in {cwd or '.'}: {target}"
         return f"{title}: {target}" if target else title
 
     def _report_action_details(self, step: int, action: str, args: dict[str, Any]) -> None:
         if action in {"read_file", "write_file", "make_directory", "list_files"}:
             self.progress(f"[step {step}] Target: {args.get('path', '.')}")
         elif action == "run_command":
+            self.progress(f"[step {step}] Working directory: {args.get('cwd', '.')}")
             self.progress(f"[step {step}] Command: {args.get('command', '')}")
         if action == "write_file":
             self.progress(f"[step {step}] Writing {len(str(args.get('content', '')))} characters.")
@@ -223,7 +317,8 @@ class AutonomousDeveloper:
         if action == "make_directory":
             return self.tools.make_directory(self._required_string(args, "path"))
         if action == "run_command":
-            return self.tools.run_command(self._required_string(args, "command"))
+            cwd = str(args.get("cwd", "."))
+            return self.tools.run_command(self._required_string(args, "command"), cwd=cwd)
         raise ValueError(f"Unknown action: {action}")
 
     @staticmethod
@@ -266,7 +361,14 @@ class AutonomousDeveloper:
         return text if len(text) <= limit else text[:limit] + f"... [truncated {len(text) - limit} chars]"
 
     @staticmethod
-    def _build_turn_prompt(task: str, plan: str, initial_listing: str, history: list[dict[str, Any]], guidance: list[str], step: int) -> str:
+    def _build_turn_prompt(
+        task: str,
+        plan: str,
+        initial_listing: str,
+        history: list[dict[str, Any]],
+        guidance: list[str],
+        step: int,
+    ) -> str:
         recent_history = history[-12:]
         guidance_text = "\n".join(f"- {item}" for item in guidance[-10:]) or "No additional user guidance."
         return (
