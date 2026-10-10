@@ -36,6 +36,8 @@ Rules:
 - After web research, inspect the local code/config and apply only the fix that matches the observed project state.
 - NEVER use `cd some-dir && command`. Shell chaining is blocked. Instead set run_command.args.cwd to the target directory and put only the executable command in args.command.
 - NEVER repeat an identical failing action. Change the action, arguments, cwd, implementation, or research the error.
+- If RECOVERY MODE appears in recent observations, the repeated action is forbidden. Choose a genuinely different diagnostic or corrective action.
+- For write_file, args.content MUST be a string containing the complete file contents.
 - Do not claim success without verification when verification is possible.
 - Stay inside the workspace.
 - Never request secrets or embed API keys in source files.
@@ -118,6 +120,7 @@ class AutonomousDeveloper:
         plan = plan or self.plan(task)
         history: list[dict[str, Any]] = []
         guidance: list[str] = []
+        blocked_fingerprints: dict[str, int] = {}
         initial_listing = self.tools.list_files(".")
         self.progress(f"[workspace] Initial files: {self._shorten(initial_listing, 500)}")
         self._event(
@@ -173,17 +176,41 @@ class AutonomousDeveloper:
             cwd = str(args.get("cwd", ".")) if action == "run_command" else None
 
             repeated = self._repeated_failure_count(history, action, args)
+            fingerprint = self._action_fingerprint(action, args)
             if repeated >= 2:
+                blocked_count = blocked_fingerprints.get(fingerprint, 0) + 1
+                blocked_fingerprints[fingerprint] = blocked_count
+
+                if blocked_count >= 3:
+                    detail = (
+                        "The model proposed the same known-bad action three times after it was blocked. "
+                        "The run is stopping to avoid wasting the remaining steps. Review the last failure or send new guidance."
+                    )
+                    self.progress(f"[step {step}] RECOVERY FAILED: {detail}")
+                    self._event(
+                        "finish",
+                        "Recovery could not escape repeated action",
+                        status="error",
+                        detail=detail,
+                        step=step,
+                        action=action,
+                        target=target,
+                        cwd=cwd,
+                    )
+                    self._event("chat", "Agent", status="info", detail=f"I stopped because I kept proposing the same failing action.\n\n{detail}")
+                    return AgentResult(False, "Stopped repeated-action loop.", detail, step, history)
+
+                recovery_action, recovery_args, recovery_reason = self._choose_recovery_action(action, args, history, blocked_count)
                 observation = (
-                    "REPEATED_ACTION_BLOCKED: This exact action already failed twice. "
-                    "Do not repeat it. Change the command, cwd, file, implementation, or use web_search for the observed error."
+                    "RECOVERY MODE: The originally proposed action was blocked because it already failed twice. "
+                    f"Instead, execute a different diagnostic action now. Forbidden action fingerprint: {fingerprint}."
                 )
                 self.progress(f"[step {step}] {observation}")
                 self._event(
                     "loop",
-                    "Repeated failing action blocked",
+                    "Repeated failing action replaced with recovery action",
                     status="warning",
-                    detail=observation,
+                    detail=f"{observation}\n\nRecovery: {recovery_action} {recovery_args}",
                     step=step,
                     action=action,
                     target=target,
@@ -191,12 +218,16 @@ class AutonomousDeveloper:
                 )
                 history.append({
                     "step": step,
-                    "action": action,
-                    "args": self._safe_args_for_history(action, args),
+                    "action": "recovery_guard",
+                    "args": {"blocked_action": action, "blocked_args": self._safe_args_for_history(action, args)},
                     "reason": reason,
                     "observation": observation,
                 })
-                continue
+                action = recovery_action
+                args = recovery_args
+                reason = recovery_reason
+                target = self._action_target(action, args)
+                cwd = str(args.get("cwd", ".")) if action == "run_command" else None
 
             self.progress(f"[step {step}] Action: {action}")
             if reason:
@@ -269,14 +300,74 @@ class AutonomousDeveloper:
         return AgentResult(False, f"Stopped after reaching the configured step limit ({self.config.max_steps}).", "Review the final observations and increase AGENT_MAX_STEPS if appropriate.", self.config.max_steps, history)
 
     @staticmethod
+    def _action_fingerprint(action: str, args: dict[str, Any]) -> str:
+        safe_args = AutonomousDeveloper._safe_args_for_history(action, args)
+        return json.dumps({"action": action, "args": safe_args}, sort_keys=True, ensure_ascii=False)
+
+    @staticmethod
+    def _choose_recovery_action(
+        blocked_action: str,
+        blocked_args: dict[str, Any],
+        history: list[dict[str, Any]],
+        blocked_count: int,
+    ) -> tuple[str, dict[str, Any], str]:
+        if blocked_action == "write_file":
+            path = blocked_args.get("path")
+            if isinstance(path, str) and path.strip() and blocked_count == 1:
+                return (
+                    "read_file",
+                    {"path": path},
+                    "Recovery mode: inspect the existing file before attempting another correction.",
+                )
+
+        latest_error = AutonomousDeveloper._latest_error(history)
+        if latest_error:
+            query = AutonomousDeveloper._sanitize_search_query(latest_error)
+            if query:
+                return (
+                    "web_search",
+                    {"query": query, "max_results": 5},
+                    "Recovery mode: research the latest public technical error instead of repeating the failed action.",
+                )
+
+        return (
+            "list_files",
+            {"path": "."},
+            "Recovery mode: re-inspect the workspace and choose a different strategy based on the actual project state.",
+        )
+
+    @staticmethod
+    def _latest_error(history: list[dict[str, Any]]) -> str:
+        for item in reversed(history):
+            observation = str(item.get("observation", ""))
+            if "TOOL_ERROR:" in observation or ("exit_code=" in observation and "exit_code=0" not in observation):
+                return observation[-1800:]
+        return ""
+
+    @staticmethod
+    def _sanitize_search_query(text: str) -> str:
+        lines = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("/") or "Users/" in stripped or "workspace/" in stripped:
+                continue
+            lines.append(stripped)
+            if len(" ".join(lines)) >= 700:
+                break
+        query = " ".join(lines)[:800].strip()
+        return query
+
+    @staticmethod
     def _repeated_failure_count(history: list[dict[str, Any]], action: str, args: dict[str, Any]) -> int:
         safe_args = AutonomousDeveloper._safe_args_for_history(action, args)
         count = 0
-        for item in reversed(history[-8:]):
+        for item in reversed(history[-12:]):
             if item.get("action") != action or item.get("args") != safe_args:
                 continue
             observation = str(item.get("observation", ""))
-            if "TOOL_ERROR:" in observation or "exit_code=" in observation and "exit_code=0" not in observation or "REPEATED_ACTION_BLOCKED" in observation:
+            if "TOOL_ERROR:" in observation or ("exit_code=" in observation and "exit_code=0" not in observation):
                 count += 1
         return count
 
@@ -365,7 +456,8 @@ class AutonomousDeveloper:
     def _safe_args_for_history(action: str, args: dict[str, Any]) -> dict[str, Any]:
         if action != "write_file":
             return args
-        content = str(args.get("content", ""))
+        raw_content = args.get("content", "")
+        content = raw_content if isinstance(raw_content, str) else repr(raw_content)
         return {"path": args.get("path"), "content_preview": content[:500], "content_length": len(content)}
 
     @staticmethod
@@ -382,7 +474,7 @@ class AutonomousDeveloper:
         guidance: list[str],
         step: int,
     ) -> str:
-        recent_history = history[-12:]
+        recent_history = history[-14:]
         guidance_text = "\n".join(f"- {item}" for item in guidance[-10:]) or "No additional user guidance."
         return (
             f"USER TASK:\n{task}\n\n"
