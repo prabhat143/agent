@@ -61,16 +61,22 @@ class WorkspaceTools:
         directory.mkdir(parents=True, exist_ok=True)
         return f"Created directory {path}"
 
-    def run_command(self, command: str) -> str:
+    def run_command(self, command: str, cwd: str = ".") -> str:
         self._validate_command(command)
         argv = shlex.split(command)
         if not argv:
             raise ToolError("Command cannot be empty.")
 
+        working_directory = self._resolve(cwd)
+        if not working_directory.exists():
+            raise ToolError(f"Working directory does not exist: {cwd}")
+        if not working_directory.is_dir():
+            raise ToolError(f"Working directory is not a directory: {cwd}")
+
         try:
             result = subprocess.run(
                 argv,
-                cwd=self.workspace,
+                cwd=working_directory,
                 capture_output=True,
                 text=True,
                 timeout=self.command_timeout,
@@ -82,6 +88,7 @@ class WorkspaceTools:
             raise ToolError(f"Command timed out after {self.command_timeout}s: {command}") from exc
 
         output = (
+            f"cwd={working_directory.relative_to(self.workspace) or Path('.')}\n"
             f"exit_code={result.returncode}\n"
             f"stdout:\n{result.stdout[-20_000:]}\n"
             f"stderr:\n{result.stderr[-20_000:]}"
@@ -112,4 +119,6 @@ class WorkspaceTools:
             raise ToolError("Command blocked by the local safety policy.")
 
         if any(token in command for token in ("&&", "||", ";", "|", ">", "<", "`", "$(")):
-            raise ToolError("Shell operators/redirection are disabled in v1. Run one command at a time.")
+            raise ToolError(
+                "Shell operators/redirection are disabled. Use run_command with a separate cwd instead of 'cd ... && ...'."
+            )
